@@ -47,9 +47,17 @@ async function init() {
     deadline TEXT,
     status TEXT,
     pct REAL,
+    weight INTEGER DEFAULT 2,
     notes TEXT,
     sort INTEGER NOT NULL
   )`);
+
+  // Migration for databases created before the weight column existed.
+  try {
+    await query('ALTER TABLE tasks ADD COLUMN weight INTEGER DEFAULT 2');
+  } catch (e) {
+    if (!/already exists|duplicate column/i.test(e.message)) throw e;
+  }
 
   const existing = await query('SELECT COUNT(*) AS n FROM tasks');
   const n = Number(existing[0].n);
@@ -57,9 +65,9 @@ async function init() {
     const seed = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed.json'), 'utf8'));
     for (const r of seed) {
       await query(
-        `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, notes, sort)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [r.phase, r.wbs, r.title, r.lead, r.start_date, r.deadline, r.status, r.pct, r.notes, r.sort]
+        `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, weight, notes, sort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [r.phase, r.wbs, r.title, r.lead, r.start_date, r.deadline, r.status, r.pct, r.weight == null ? 2 : r.weight, r.notes, r.sort]
       );
     }
     console.log(`Seeded ${seed.length} tasks from seed.json`);

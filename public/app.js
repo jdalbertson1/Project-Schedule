@@ -42,6 +42,12 @@ function pctCell(pct) {
   return `<span class="pct-cell"><span class="pct-bar"><i style="width:${Math.round(pct * 100)}%"></i></span>${fmtPct(pct)}</span>`;
 }
 
+const WEIGHT_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High' };
+function weightChip(w) {
+  const v = w == null ? 2 : Number(w);
+  return `<span class="weight-chip weight-${v}">${WEIGHT_LABELS[v] || 'Medium'}</span>`;
+}
+
 /* ---------------- tabs ---------------- */
 $$('.tab[data-view]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -147,15 +153,16 @@ async function renderSchedule() {
     }).join('');
     return `
     <tr data-id="${r.id}" class="${rowCls}">
-      <td class="mono"><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
-      <td class="title-cell"><span class="indent-${Math.min(level, 4)}">${esc(r.title)}</span></td>
+      <td class="mono sticky-col"><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
+      <td class="title-cell sticky-col-2"><span class="indent-${Math.min(level, 4)}">${esc(r.title)}</span></td>
       <td>${esc(r.lead || '')}</td>
       <td class="mono">${fmtDate(r.start_date)}</td>
       <td class="mono">${fmtDate(r.deadline)}</td>
       <td>${statusChip(r.status)}</td>
+      <td>${r.is_leaf ? weightChip(r.weight) : ''}</td>
       <td class="num">${fmtPct(r.pct)}</td>
       <td class="notes-cell">${esc(r.notes || '')}</td>
-      <td class="row-actions">${r.is_leaf ? `<button data-act="edit">Edit</button><button data-act="delete">Delete</button>` : ''}</td>
+      <td class="actions-cell">${r.is_leaf ? `<div class="row-actions"><button data-act="edit">Edit</button><button data-act="delete">Delete</button></div>` : ''}</td>
       ${gantt}
     </tr>`;
   }).join('');
@@ -185,15 +192,18 @@ document.addEventListener('click', async e => {
     if (!r) return;
     tr.classList.add('editing');
     const statusOpts = LISTS.statuses.map(s => `<option ${s === r.status ? 'selected' : ''}>${s}</option>`).join('');
+    const weightVal = r.weight == null ? 2 : Number(r.weight);
+    const weightOpts = LISTS.weights.map(w => `<option value="${w.value}" ${w.value === weightVal ? 'selected' : ''}>${w.label}</option>`).join('');
     const cells = tr.children;
     cells[1].innerHTML = `<input name="title" value="${esc(r.title)}">`;
     cells[2].innerHTML = `<input name="lead" value="${esc(r.lead || '')}" list="leads-list">`;
     cells[3].innerHTML = `<input type="date" name="startDate" value="${r.start_date || ''}">`;
     cells[4].innerHTML = `<input type="date" name="deadline" value="${r.deadline || ''}">`;
     cells[5].innerHTML = `<select name="status">${statusOpts}</select>`;
-    cells[6].innerHTML = `<input type="number" name="pct" min="0" max="100" step="5" value="${Math.round((r.pct || 0) * 100)}" style="max-width:70px">`;
-    cells[7].innerHTML = `<input name="notes" value="${esc(r.notes || '')}">`;
-    cells[8].innerHTML = `<div class="row-actions"><button data-act="save">Save</button><button data-act="cancel">Cancel</button></div>`;
+    cells[6].innerHTML = `<select name="weight">${weightOpts}</select>`;
+    cells[7].innerHTML = `<input type="number" name="pct" min="0" max="100" step="5" value="${Math.round((r.pct || 0) * 100)}" style="max-width:70px">`;
+    cells[8].innerHTML = `<input name="notes" value="${esc(r.notes || '')}">`;
+    cells[9].innerHTML = `<div class="row-actions"><button data-act="save">Save</button><button data-act="cancel">Cancel</button></div>`;
     return;
   }
 
@@ -206,7 +216,7 @@ document.addEventListener('click', async e => {
         method: 'PATCH',
         body: JSON.stringify({
           title: val('title'), lead: val('lead'), startDate: val('startDate'),
-          deadline: val('deadline'), status: val('status'),
+          deadline: val('deadline'), status: val('status'), weight: Number(val('weight')),
           pct: Number(val('pct')) / 100, notes: val('notes'),
         }),
       });
@@ -225,6 +235,7 @@ async function renderLists() {
   const statusSel = $('#add-form [name="status"]');
   statusSel.innerHTML = '<option value="">Auto (from % complete)</option>' +
     LISTS.statuses.map(s => `<option>${s}</option>`).join('');
+  $('#f-weight').innerHTML = LISTS.weights.map(w => `<option value="${w.value}" ${w.value === 2 ? 'selected' : ''}>${w.label}</option>`).join('');
   updateSubtaskOptions();
 }
 
