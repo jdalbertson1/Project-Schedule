@@ -152,12 +152,21 @@ tr.is-parent .gantt-seg.on { height: 6px; opacity: 0.45; }
   border-left: 2px dashed var(--danger); opacity: 0.55;
 }
 
-.row-actions button {
-  appearance: none; border: 1px solid var(--line); background: #fff; border-radius: 6px;
-  font: 600 12px var(--font-ui); padding: 4px 10px; cursor: pointer; color: var(--ink-soft);
-}
-.row-actions button:hover { border-color: var(--ink-soft); color: var(--ink); }
 .row-actions { display: flex; gap: 6px; }
+.row-actions button {
+  appearance: none; border: 1px solid var(--line); background: #fff; border-radius: 999px;
+  font: 600 11.5px var(--font-ui); padding: 5px 12px; cursor: pointer; color: var(--ink-soft);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.row-actions button:hover { border-color: var(--ink-soft); color: var(--ink); box-shadow: 0 1px 3px rgba(27, 39, 51, 0.1); }
+.row-actions button:active { box-shadow: none; transform: translateY(1px); }
+.row-actions button:focus-visible { outline: 2px solid var(--ph-1); outline-offset: 1px; }
+
+.row-actions button[data-act="edit"]:hover { border-color: var(--ph-1); color: var(--ph-1); }
+.row-actions button[data-act="save"] { border-color: var(--ph-1); background: var(--ph-1); color: #fff; }
+.row-actions button[data-act="save"]:hover { background: #244d70; border-color: #244d70; color: #fff; }
+.row-actions button[data-act="delete"]:hover { border-color: var(--danger); color: var(--danger); background: #fbeceb; }
+.row-actions button[data-act="cancel"]:hover { border-color: var(--ink-faint); }
 
 /* inline edit row */
 tr.editing td { background: #fbfcf3; }
