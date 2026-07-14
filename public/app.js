@@ -434,14 +434,19 @@ function updateMeetingModeButton() {
   btn.classList.toggle('meeting-mode-active', meetingModeOn);
 }
 
+let currentMeetingTitle = '';
+let currentMeetingDate = '';
+
 async function openMeeting(id) {
   const m = await api(`/api/meetings/${id}`);
   currentMeetingId = m.id;
+  currentMeetingTitle = m.title;
+  currentMeetingDate = m.meeting_date;
   meetingModeOn = false;
   savedRange = null;
   updateMeetingModeButton();
-  $('#meeting-editor-title').textContent = m.title;
-  $('#meeting-editor-date').textContent = fmtDate(m.meeting_date);
+  $('#meeting-editor-title').value = m.title;
+  $('#meeting-editor-date').value = m.meeting_date;
   $('#meeting-doc').innerHTML = m.content_html || '';
   $('#meeting-dl-docx').href = `/api/meetings/${id}/export.docx`;
   $('#meeting-dl-pdf').href = `/api/meetings/${id}/export.pdf`;
@@ -455,6 +460,30 @@ $('#meeting-back').addEventListener('click', () => {
   $('#meeting-editor-panel').hidden = true;
   $('#meetings-list-panel').hidden = false;
   currentMeetingId = null;
+});
+
+$('#meeting-editor-title').addEventListener('blur', async e => {
+  if (!currentMeetingId) return;
+  const title = e.target.value.trim();
+  if (!title) { e.target.value = currentMeetingTitle; return; }
+  if (title === currentMeetingTitle) return;
+  try {
+    await api(`/api/meetings/${currentMeetingId}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+    currentMeetingTitle = title;
+    await renderMeetingsList();
+  } catch (err) { toast(err.message); e.target.value = currentMeetingTitle; }
+});
+
+$('#meeting-editor-date').addEventListener('change', async e => {
+  if (!currentMeetingId) return;
+  const meetingDate = e.target.value;
+  if (!meetingDate || meetingDate === currentMeetingDate) return;
+  try {
+    await api(`/api/meetings/${currentMeetingId}`, { method: 'PATCH', body: JSON.stringify({ meetingDate }) });
+    currentMeetingDate = meetingDate;
+    await renderMeetingsList();
+    toast('Meeting date updated');
+  } catch (err) { toast(err.message); e.target.value = currentMeetingDate; }
 });
 
 /* Toolbar buttons steal focus from the contenteditable on click, which loses
@@ -496,6 +525,56 @@ function placeCaretInNode(node) {
 // Native buttons (not the color <input>) shouldn't steal focus at all — this
 // keeps the caret exactly where the user left it with zero flicker.
 $$('.meeting-toolbar button').forEach(btn => btn.addEventListener('mousedown', e => e.preventDefault()));
+
+function closestLi(doc) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !doc.contains(sel.anchorNode)) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  node = node.nodeType === 3 ? node.parentElement : node;
+  return closestAncestor(node, 'LI', doc);
+}
+
+// Nests `li` under its previous sibling, creating a sublist if one doesn't
+// already exist there. Returns false (no-op) if this is the first item in
+// its list — there's nothing to nest under.
+function indentListItem(li) {
+  const prevLi = li.previousElementSibling;
+  if (!prevLi || prevLi.tagName !== 'LI') return false;
+  let nestedList = null;
+  for (const child of prevLi.children) {
+    if (child.tagName === 'UL' || child.tagName === 'OL') { nestedList = child; break; }
+  }
+  if (!nestedList) {
+    nestedList = document.createElement(li.parentElement.tagName.toLowerCase());
+    prevLi.appendChild(nestedList);
+  }
+  nestedList.appendChild(li);
+  return true;
+}
+
+// Moves `li` up one nesting level, placing it right after the parent list's
+// own containing <li>. Returns false if already at the top level.
+function outdentListItem(li) {
+  const parentList = li.parentElement;
+  const grandLi = parentList.parentElement;
+  if (!grandLi || grandLi.tagName !== 'LI') return false;
+  grandLi.after(li);
+  if (!parentList.children.length) parentList.remove();
+  return true;
+}
+
+$('#meeting-doc').addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const doc = $('#meeting-doc');
+  const li = closestLi(doc);
+  if (!li) return; // outside a list — let Tab behave normally (focus move)
+  e.preventDefault();
+  // Capture the same li reference before the DOM move — the live selection
+  // can be lost mid-move, so re-deriving "current li" from it afterward
+  // would silently fail. Reuse the reference we already have instead.
+  const changed = e.shiftKey ? outdentListItem(li) : indentListItem(li);
+  if (changed) placeCaretInNode(li);
+});
 
 $('#meeting-mode-toggle').addEventListener('click', () => {
   meetingModeOn = !meetingModeOn;

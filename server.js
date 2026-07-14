@@ -469,6 +469,10 @@ app.patch('/api/meetings/:id', async (req, res, next) => {
     const fields = {};
     if (b.title !== undefined) fields.title = String(b.title).trim() || existing[0].title;
     if (b.content_html !== undefined) fields.content_html = String(b.content_html);
+    if (b.meetingDate !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.meetingDate)) return res.status(400).json({ error: 'Enter a valid meeting date.' });
+      fields.meeting_date = b.meetingDate;
+    }
     const keys = Object.keys(fields);
     if (!keys.length) return res.json({ ok: true });
     fields.updated_at = new Date().toISOString();

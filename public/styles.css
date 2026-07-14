@@ -257,6 +257,20 @@ tr.editing td { background: #fbfcf3; }
   cursor: pointer; padding: 0 0 6px; display: block;
 }
 .link-back:hover { text-decoration: underline; }
+.meeting-title-input {
+  display: block; appearance: none; border: 1px solid transparent; background: none;
+  font: 700 20px var(--font-ui); color: var(--ink); padding: 3px 6px; margin: 0 0 2px -6px;
+  border-radius: 6px; width: 100%; max-width: 420px;
+}
+.meeting-title-input:hover { border-color: var(--line); }
+.meeting-title-input:focus { border-color: var(--ph-1); background: #fff; outline: none; }
+.meeting-date-input {
+  display: block; appearance: none; border: 1px solid transparent; background: none;
+  font: 500 13.5px var(--font-ui); color: var(--ink-soft); padding: 2px 6px; margin-left: -6px;
+  border-radius: 6px;
+}
+.meeting-date-input:hover { border-color: var(--line); }
+.meeting-date-input:focus { border-color: var(--ph-1); background: #fff; outline: none; }
 .meeting-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 #meeting-mode-toggle.meeting-mode-active { background: #e2f2e8; border-color: var(--ph-2); color: var(--ph-2); }
 .fmt-group { display: flex; gap: 4px; }
@@ -278,7 +292,9 @@ tr.editing td { background: #fbfcf3; }
 .meeting-doc h2 { font-size: 16.5px; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); color: var(--ink); }
 .meeting-doc h2:first-child { margin-top: 0; }
 .meeting-doc h3 { font-size: 13.5px; margin: 16px 0 8px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.5px; }
-.meeting-doc ul { margin: 0 0 10px; padding-left: 22px; }
+.meeting-doc ul { margin: 0 0 10px; padding-left: 22px; list-style-type: disc; }
+.meeting-doc ul ul { margin: 4px 0; list-style-type: circle; }
+.meeting-doc ul ul ul { list-style-type: square; }
 .meeting-doc li { margin: 4px 0; }
 .meeting-doc em { color: var(--ink-faint); }
 .meeting-doc table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0 0 14px; }
