@@ -353,6 +353,7 @@ async function openMeeting(id) {
   const m = await api(`/api/meetings/${id}`);
   currentMeetingId = m.id;
   meetingModeOn = false;
+  savedRange = null;
   updateMeetingModeButton();
   $('#meeting-editor-title').textContent = m.title;
   $('#meeting-editor-date').textContent = fmtDate(m.meeting_date);
@@ -362,6 +363,7 @@ async function openMeeting(id) {
   $('#meeting-msg').textContent = '';
   $('#meetings-list-panel').hidden = true;
   $('#meeting-editor-panel').hidden = false;
+  document.execCommand('styleWithCSS', false, true);
 }
 
 $('#meeting-back').addEventListener('click', () => {
@@ -370,31 +372,130 @@ $('#meeting-back').addEventListener('click', () => {
   currentMeetingId = null;
 });
 
-$('#meeting-mode-toggle').addEventListener('click', () => {
-  meetingModeOn = !meetingModeOn;
-  updateMeetingModeButton();
-  $('#meeting-doc').focus();
-  document.execCommand('styleWithCSS', false, true);
-  document.execCommand('foreColor', false, meetingModeOn ? MEETING_NOTE_COLOR : '#1b2733');
-});
-
-$('#meeting-add-item').addEventListener('click', () => {
+/* Toolbar buttons steal focus from the contenteditable on click, which loses
+   the user's cursor position. We track the last selection made *inside* the
+   doc and restore it before acting, so every toolbar action applies at the
+   cursor rather than always at the end of the document. `selectionchange` can
+   fire asynchronously (after the next task), which loses a race against fast
+   focus-stealing controls like the native color picker — mouseup/keyup on the
+   doc itself fire synchronously within the same interaction, so we use those
+   as the primary capture and selectionchange as a fallback for edge cases
+   (e.g. select-all via keyboard shortcut, or selection changed via script). */
+let savedRange = null;
+function syncSavedRange() {
+  const sel = window.getSelection();
+  const doc = $('#meeting-doc');
+  if (sel.rangeCount && doc.contains(sel.anchorNode)) {
+    savedRange = sel.getRangeAt(0).cloneRange();
+  }
+}
+$('#meeting-doc').addEventListener('mouseup', syncSavedRange);
+$('#meeting-doc').addEventListener('keyup', syncSavedRange);
+document.addEventListener('selectionchange', syncSavedRange);
+function restoreSelection() {
   const doc = $('#meeting-doc');
   doc.focus();
-  let target = doc.querySelector('ul:last-of-type');
-  if (!target) {
-    doc.insertAdjacentHTML('beforeend', '<h2>Discussion items</h2><ul></ul>');
-    target = doc.querySelector('ul:last-of-type');
-  }
-  const li = document.createElement('li');
-  li.innerHTML = '<br>';
-  target.appendChild(li);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  if (savedRange) sel.addRange(savedRange);
+}
+function placeCaretInNode(node) {
   const range = document.createRange();
-  range.selectNodeContents(li);
+  range.selectNodeContents(node);
   range.collapse(false);
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
+  savedRange = range.cloneRange();
+}
+// Native buttons (not the color <input>) shouldn't steal focus at all — this
+// keeps the caret exactly where the user left it with zero flicker.
+$$('.meeting-toolbar button').forEach(btn => btn.addEventListener('mousedown', e => e.preventDefault()));
+
+$('#meeting-mode-toggle').addEventListener('click', () => {
+  meetingModeOn = !meetingModeOn;
+  updateMeetingModeButton();
+  restoreSelection();
+  document.execCommand('foreColor', false, meetingModeOn ? MEETING_NOTE_COLOR : '#1b2733');
+});
+
+$('#fmt-bold').addEventListener('click', () => {
+  restoreSelection();
+  document.execCommand('bold');
+});
+$('#fmt-italic').addEventListener('click', () => {
+  restoreSelection();
+  document.execCommand('italic');
+});
+$('#fmt-color').addEventListener('input', () => {
+  restoreSelection();
+  document.execCommand('foreColor', false, $('#fmt-color').value);
+});
+
+$('#meeting-add-header').addEventListener('click', () => {
+  const doc = $('#meeting-doc');
+  restoreSelection();
+  const h = document.createElement('h2');
+  h.textContent = 'New heading';
+  insertBlockAfterCursor(doc, h);
+  const range = document.createRange();
+  range.selectNodeContents(h);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  savedRange = range.cloneRange();
+});
+
+// Finds the top-level block (direct child of `doc`) containing the cursor
+// and inserts `el` right after it, so new sections land where the user is
+// looking rather than always at the bottom of the document.
+function insertBlockAfterCursor(doc, el) {
+  const sel = window.getSelection();
+  if (sel.rangeCount && doc.contains(sel.anchorNode)) {
+    let node = sel.getRangeAt(0).startContainer;
+    node = node.nodeType === 3 ? node.parentElement : node;
+    while (node && node.parentElement !== doc && node !== doc) node = node.parentElement;
+    if (node && node !== doc) { node.after(el); return; }
+  }
+  doc.appendChild(el);
+}
+
+$('#meeting-add-item').addEventListener('click', () => {
+  const doc = $('#meeting-doc');
+  restoreSelection();
+  const sel = window.getSelection();
+  let li = null;
+
+  if (sel.rangeCount && doc.contains(sel.anchorNode)) {
+    let node = sel.getRangeAt(0).startContainer;
+    node = node.nodeType === 3 ? node.parentElement : node;
+    let curLi = node;
+    while (curLi && curLi !== doc && curLi.tagName !== 'LI') curLi = curLi.parentElement;
+    if (curLi && curLi.tagName === 'LI') {
+      li = document.createElement('li');
+      li.innerHTML = '<br>';
+      curLi.after(li);
+    } else {
+      let curUl = node;
+      while (curUl && curUl !== doc && curUl.tagName !== 'UL') curUl = curUl.parentElement;
+      if (curUl) {
+        li = document.createElement('li');
+        li.innerHTML = '<br>';
+        curUl.appendChild(li);
+      }
+    }
+  }
+  if (!li) {
+    let target = doc.querySelector('ul:last-of-type');
+    if (!target) {
+      doc.insertAdjacentHTML('beforeend', '<h2>Discussion items</h2><ul></ul>');
+      target = doc.querySelector('ul:last-of-type');
+    }
+    li = document.createElement('li');
+    li.innerHTML = '<br>';
+    target.appendChild(li);
+  }
+  placeCaretInNode(li);
 });
 
 async function saveMeetingNotes() {
@@ -418,7 +519,10 @@ $('#meeting-dropbox').addEventListener('click', async () => {
   if (!currentMeetingId) return;
   try {
     const status = await api('/api/dropbox/status');
-    if (!status.configured) { toast('Dropbox is not connected yet.'); return; }
+    if (!status.configured) {
+      toast(status.missing?.length ? `Dropbox missing env var(s): ${status.missing.join(', ')}` : 'Dropbox is not connected yet.');
+      return;
+    }
     await saveMeetingNotes();
     const out = await api(`/api/meetings/${currentMeetingId}/dropbox`, { method: 'POST', body: JSON.stringify({ format: 'docx' }) });
     toast(`Sent to Dropbox: ${out.path}`);

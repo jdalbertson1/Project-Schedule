@@ -484,7 +484,8 @@ app.get('/api/meetings/:id/export.pdf', async (req, res, next) => {
 });
 
 app.get('/api/dropbox/status', (req, res) => {
-  res.json({ configured: dropbox.isConfigured() });
+  const missing = dropbox.missingVars();
+  res.json({ configured: missing.length === 0, missing });
 });
 
 app.post('/api/meetings/:id/dropbox', async (req, res, next) => {

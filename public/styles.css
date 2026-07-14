@@ -251,6 +251,17 @@ tr.editing td { background: #fbfcf3; }
 .link-back:hover { text-decoration: underline; }
 .meeting-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 #meeting-mode-toggle.meeting-mode-active { background: #e2f2e8; border-color: var(--ph-2); color: var(--ph-2); }
+.fmt-group { display: flex; gap: 4px; }
+.fmt-btn { padding: 10px 14px; min-width: 20px; text-align: center; }
+.fmt-color-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 10px 10px; cursor: pointer; font-weight: 700;
+}
+.fmt-color-btn input[type="color"] {
+  appearance: none; -webkit-appearance: none; width: 18px; height: 18px; border: 1px solid var(--line);
+  border-radius: 4px; padding: 0; cursor: pointer; background: none;
+}
+.fmt-color-btn input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.fmt-color-btn input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
 .meeting-doc {
   margin-top: 18px; padding: 20px 24px; border: 1px solid var(--line); border-radius: 10px;
   background: #fff; min-height: 320px; font-size: 14.5px; line-height: 1.6; color: var(--ink);
