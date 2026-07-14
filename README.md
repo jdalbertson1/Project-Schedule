@@ -1,11 +1,13 @@
 # NEORide EZData Schedule — Web App
 
-A web replacement for `EZData_Schedule.xlsm`. Everything the workbook did, without macros:
+A web replacement for `EZData_Schedule.xlsm`. Everything the workbook did, without macros, plus a few things it never did.
 
-- **Dashboard** — overall completion, items due in the next 14 days, in-progress / complete counts, phase summary, near-term actions list, plus an overdue list (new).
-- **Schedule** — the full WBS table with the 48-month Gantt view, phase color coding, and inline editing of leaf rows. Parent rows roll up automatically (min start, max deadline, average % of leaf tasks — same math as the hidden formula columns).
+- **Dashboard** — overall completion (weighted — see below), items due in the next 14 days, in-progress / complete counts, phase summary, near-term actions list, plus an overdue list.
+- **Schedule** — the full WBS table with the 48-month Gantt view, phase color coding, and inline editing of leaf rows. The WBS and Task/Subtask columns stay frozen while you scroll right through the Gantt view. Parent rows roll up automatically (min start, max deadline, **weighted** average % of leaf tasks).
+- **Weight** — each leaf task carries a Low/Medium/High weight (editable inline and in the Add Task form) so a recurring or larger line item counts for more in its parent's rollup than a one-off small task. Every task defaults to Medium, so rollups are unaffected until you deliberately reassign a weight.
 - **Add task** — the Task Entry form. WBS numbers are generated and the line is inserted into the right block automatically, exactly like the old `SubmitTask` macro (including "new subtask" creation).
-- **Export CSV** — download the computed schedule any time.
+- **Meetings** — create a dated agenda that auto-imports a snapshot of what's due in the next two weeks (as a table, same columns as the dashboard's near-term list) under an "EZData" section, plus a "NEORide Technology On-Call Projects" section for anything else. Add your own discussion items, then mark up the agenda live during the meeting — a "Meeting mode" toggle colors newly typed text so notes are visually distinct from the pre-meeting agenda. Bold/italic/font-color and new headers are also available. Every meeting is saved and browsable from a history list. Download any meeting as a real Word (.docx) or PDF document, or send it straight to a Dropbox folder.
+- **Export** — CSV, or Excel (.xlsx) which mirrors the on-screen formatting (row shading, status/weight chips, frozen columns) and renders the Gantt chart as colored month cells, plus a phase-color legend sheet.
 
 Your full schedule data is included in `seed.json` and loads automatically the first time the app starts against an empty database.
 
@@ -32,11 +34,18 @@ Your full schedule data is included in `seed.json` and loads automatically the f
 
 3. **Add a Postgres database.** In the project canvas: **+ Create** → **Database** → **PostgreSQL**. Then open your app service → **Variables** → **Add Variable Reference** → select `DATABASE_URL` from the Postgres service. (If Railway offers to link it automatically, accept.)
 
-4. **Redeploy** the app service (Deployments → ⋮ → Redeploy). On first boot it creates the `tasks` table and seeds it from `seed.json` — you'll see `Seeded 55 tasks` in the deploy logs.
+4. **Redeploy** the app service (Deployments → ⋮ → Redeploy). On first boot it creates the `tasks` and `meetings` tables and seeds tasks from `seed.json` — you'll see `Seeded 55 tasks` in the deploy logs.
 
 5. **Get your URL.** App service → **Settings** → **Networking** → **Generate Domain**. That's the link you share with the team.
 
 6. **(Recommended) Add a password.** The URL is public by default. In the app service → **Variables** → add `APP_PASSWORD` = anything you like. The site will then prompt for it (leave the username blank). Share the password with Jenna, Katherine, etc.
+
+7. **(Optional) Enable "Send to Dropbox".** Requires a Dropbox app with **Full Dropbox** access (not "App folder" — that scope can only reach its own sandboxed folder, not an existing shared one) if you want exports to land in a folder you already use:
+   - Create an app at [dropbox.com/developers/apps](https://www.dropbox.com/developers/apps), scoped access → Full Dropbox, enable the `files.content.write` permission.
+   - Authorize it and exchange the code for a refresh token (see Dropbox's OAuth2 docs — the short version: hit `/oauth2/authorize?client_id=...&token_access_type=offline&response_type=code`, then POST the returned code to `/oauth2/token` to get a `refresh_token`).
+   - Add Railway variables: `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`, and `DROPBOX_FOLDER` (the exact path of your destination folder, e.g. `/Team Meetings` — found from the folder's breadcrumb path in Dropbox, not its share link).
+   - Any time you add/change Railway variables, you must **Deploy** the pending changes (or Redeploy) — the running server won't see them until it restarts.
+   - Check `/api/dropbox/status` on your deployed app any time to see whether it's connected and which variables (if any) are missing.
 
 ### Option B — Railway CLI (no GitHub)
 
@@ -69,17 +78,18 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | Workbook | Web app |
 |---|---|
 | Dashboard sheet formulas | `GET /api/dashboard` |
-| Schedule sheet + hidden helper columns (BG/BH/BI) + Gantt formulas | `GET /api/schedule` (rollups computed server-side) + Gantt rendered in the browser |
+| Schedule sheet + hidden helper columns (BG/BH/BI) + Gantt formulas | `GET /api/schedule` (rollups computed server-side, weighted by task weight) + Gantt rendered in the browser |
 | Task Entry sheet + `SubmitTask` macro | Add task form → `POST /api/tasks` |
 | Hidden Lists sheet | `GET /api/lists` (derived live from the data, so new leads appear automatically) |
 | Editing cells directly | Edit button on any leaf row → `PATCH /api/tasks/:id` |
-| — | `DELETE /api/tasks/:id`, `GET /api/export.csv` (new) |
+| — | `DELETE /api/tasks/:id`, `GET /api/export.csv`, `GET /api/export.xlsx` |
+| — | Meeting agendas/minutes → `GET/POST /api/meetings`, `GET/PATCH/DELETE /api/meetings/:id`, `.../export.docx`, `.../export.pdf`, `.../dropbox` |
 
 ## Notes / known data quirks carried over from the workbook
 
-- **Three rows were invisible to the old dashboard.** Rows for *Agency Interviews (2.1.4)*, *Draft SEMP*, and *Final SEMP* were inserted into the sheet without the hidden helper formulas, so Excel excluded them from every completion metric. The web app includes them, which is why overall completion reads **13.1%** here vs **14.2%** in Excel — the web number is the correct one.
+- **Three rows were invisible to the old dashboard.** Rows for *Agency Interviews (2.1.4)*, *Draft SEMP*, and *Final SEMP* were inserted into the sheet without the hidden helper formulas, so Excel excluded them from every completion metric. The web app includes them, which is why overall completion reads differently here than in the old Excel file — the web number is the correct one.
 - **Duplicate WBS "2.1.3".** *Draft SEMP* and *Final SEMP* both carry WBS 2.1.3 (also used by *Synthesize discovery findings*), even though they sit under 2.2 Systems Engineering Management Plan. The data was preserved exactly as-is; you can renumber them with the Edit button (e.g. retitle them or fold them under 2.2 by deleting and re-adding with "Existing subtask: 2.2").
 
 ## Backups
 
-Railway Postgres supports backups from the database service's **Backups** tab. You can also just hit **Export CSV** in the app periodically — it captures the full computed schedule.
+Railway Postgres supports backups from the database service's **Backups** tab. You can also hit **Export ▾ → CSV** or **→ Excel** in the app any time — Excel captures the full computed schedule with formatting; CSV is the lightest-weight option.

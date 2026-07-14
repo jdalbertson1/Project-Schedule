@@ -113,15 +113,31 @@ function fmtDateLong(iso) {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
-// The starting document for a new agenda: a snapshot of what's due in the
-// next two weeks (as of the chosen meeting date), then an empty section for
-// discussion items the user adds before/during the meeting.
+// The starting document for a new agenda: an EZData section with a snapshot
+// of what's due in the next two weeks (as of the chosen meeting date)
+// rendered as a table — the same columns as the dashboard's near-term-actions
+// table — plus an empty discussion-items list, followed by a second section
+// for NEORide Technology On-Call Projects with just a discussion placeholder.
 function buildAgendaHtml(rows, meetingDate) {
   const snapshot = nearTermSnapshot(rows, meetingDate);
-  const items = snapshot.length
-    ? snapshot.map(l => `<li><strong>${escHtml(l.wbs)}</strong> ${escHtml(l.title)} — ${escHtml(l.lead || 'Unassigned')} — due ${escHtml(fmtDateLong(l.deadline))} (${Math.round((l.pct || 0) * 100)}%)</li>`).join('')
-    : '<li><em>Nothing due in the next two weeks.</em></li>';
-  return `<h2>Upcoming two weeks (as of ${escHtml(fmtDateLong(meetingDate))})</h2><ul>${items}</ul><h2>Discussion items</h2><ul><li><br></li></ul>`;
+  const tableBody = snapshot.length
+    ? snapshot.map(l => `<tr>
+        <td>${escHtml(l.wbs)}</td>
+        <td>${escHtml(l.title)}</td>
+        <td>${escHtml(l.lead || '')}</td>
+        <td>${escHtml(fmtDateLong(l.start_date))}</td>
+        <td>${escHtml(fmtDateLong(l.deadline))}</td>
+        <td>${escHtml(l.status || '')}</td>
+        <td>${Math.round((l.pct || 0) * 100)}%</td>
+        <td>${escHtml(l.notes || '')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="8"><em>Nothing due in the next two weeks.</em></td></tr>';
+  const table = `<table><thead><tr><th>WBS</th><th>Task / Subtask</th><th>Lead</th><th>Start</th><th>Deadline</th><th>Status</th><th>%</th><th>Notes</th></tr></thead><tbody>${tableBody}</tbody></table>`;
+  return `<h2>EZData</h2>`
+    + `<h3>Upcoming two weeks (as of ${escHtml(fmtDateLong(meetingDate))})</h3>${table}`
+    + `<h3>Discussion items</h3><ul><li><br></li></ul>`
+    + `<h2>NEORide Technology On-Call Projects</h2>`
+    + `<h3>Discussion items</h3><ul><li><br></li></ul>`;
 }
 
 // ---------------------------------------------------------------------------

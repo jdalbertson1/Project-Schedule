@@ -446,6 +446,19 @@ $('#meeting-add-header').addEventListener('click', () => {
   savedRange = range.cloneRange();
 });
 
+// Walks up from `node` looking for an ancestor with tag `tagName`, stopping
+// at (and never matching) `boundary`. Returns null if none is found — the
+// caller must treat that as "not found", not fall through to using the
+// boundary element itself as if it matched.
+function closestAncestor(node, tagName, boundary) {
+  let el = node;
+  while (el && el !== boundary) {
+    if (el.tagName === tagName) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 // Finds the top-level block (direct child of `doc`) containing the cursor
 // and inserts `el` right after it, so new sections land where the user is
 // looking rather than always at the bottom of the document.
@@ -469,15 +482,13 @@ $('#meeting-add-item').addEventListener('click', () => {
   if (sel.rangeCount && doc.contains(sel.anchorNode)) {
     let node = sel.getRangeAt(0).startContainer;
     node = node.nodeType === 3 ? node.parentElement : node;
-    let curLi = node;
-    while (curLi && curLi !== doc && curLi.tagName !== 'LI') curLi = curLi.parentElement;
-    if (curLi && curLi.tagName === 'LI') {
+    const curLi = closestAncestor(node, 'LI', doc);
+    if (curLi) {
       li = document.createElement('li');
       li.innerHTML = '<br>';
       curLi.after(li);
     } else {
-      let curUl = node;
-      while (curUl && curUl !== doc && curUl.tagName !== 'UL') curUl = curUl.parentElement;
+      const curUl = closestAncestor(node, 'UL', doc);
       if (curUl) {
         li = document.createElement('li');
         li.innerHTML = '<br>';

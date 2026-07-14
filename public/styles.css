@@ -267,11 +267,20 @@ tr.editing td { background: #fbfcf3; }
   background: #fff; min-height: 320px; font-size: 14.5px; line-height: 1.6; color: var(--ink);
 }
 .meeting-doc:focus { outline: 2px solid var(--ph-1); outline-offset: -1px; }
-.meeting-doc h2 { font-size: 15.5px; margin: 20px 0 8px; color: var(--ink); }
+.meeting-doc h2 { font-size: 16.5px; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); color: var(--ink); }
 .meeting-doc h2:first-child { margin-top: 0; }
+.meeting-doc h3 { font-size: 13.5px; margin: 16px 0 8px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.5px; }
 .meeting-doc ul { margin: 0 0 10px; padding-left: 22px; }
 .meeting-doc li { margin: 4px 0; }
 .meeting-doc em { color: var(--ink-faint); }
+.meeting-doc table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0 0 14px; }
+.meeting-doc th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
+  color: var(--ink-faint); font-weight: 600; padding: 7px 9px; border-bottom: 2px solid var(--line);
+  background: var(--paper); white-space: nowrap;
+}
+.meeting-doc td { padding: 7px 9px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.meeting-doc tr:last-child td { border-bottom: 1px solid var(--line); }
 
 /* ---------- toast ---------- */
 .toast {
