@@ -266,6 +266,91 @@ $('#add-form').addEventListener('submit', async e => {
   }
 });
 
+/* ---------------- AI fill (Add Task) ---------------- */
+let speechRecognizer = null;
+let recognizing = false;
+
+async function initAiFillPanel() {
+  let status;
+  try { status = await api('/api/ai/status'); } catch { status = { configured: false }; }
+  if (!status.configured) return; // stays hidden — no key configured server-side
+  $('#ai-fill-panel').hidden = false;
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    $('#ai-mic-btn').hidden = true;
+    $('#ai-status-msg').textContent = "Voice input isn't supported in this browser — type your statement instead.";
+    return;
+  }
+  speechRecognizer = new SpeechRecognition();
+  speechRecognizer.continuous = true;
+  speechRecognizer.interimResults = true;
+  speechRecognizer.lang = 'en-US';
+  let baseText = '';
+  speechRecognizer.onresult = e => {
+    let finalText = baseText;
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += t + ' ';
+      else interim += t;
+    }
+    $('#ai-transcript').value = finalText;
+    baseText = finalText;
+    $('#ai-status-msg').textContent = interim ? `Listening… ${interim}` : 'Listening…';
+  };
+  speechRecognizer.onerror = e => { $('#ai-status-msg').textContent = `Mic error: ${e.error}`; stopListening(); };
+  speechRecognizer.onend = () => stopListening();
+}
+
+function stopListening() {
+  recognizing = false;
+  const btn = $('#ai-mic-btn');
+  btn.textContent = '🎤 Start speaking';
+  btn.classList.remove('mic-active');
+}
+
+$('#ai-mic-btn').addEventListener('click', () => {
+  if (!speechRecognizer) return;
+  if (recognizing) { speechRecognizer.stop(); return; }
+  recognizing = true;
+  const btn = $('#ai-mic-btn');
+  btn.textContent = '⏹ Stop';
+  btn.classList.add('mic-active');
+  $('#ai-status-msg').textContent = 'Listening…';
+  speechRecognizer.start();
+});
+
+$('#ai-fill-btn').addEventListener('click', async () => {
+  const transcript = $('#ai-transcript').value.trim();
+  if (!transcript) { toast('Say or type something first'); return; }
+  if (recognizing) speechRecognizer.stop();
+  $('#ai-status-msg').textContent = 'Thinking…';
+  try {
+    const fields = await api('/api/ai/parse-task', { method: 'POST', body: JSON.stringify({ transcript }) });
+    applyAiFields(fields);
+    $('#ai-status-msg').textContent = 'Filled in below — review before submitting.';
+  } catch (err) {
+    $('#ai-status-msg').textContent = '';
+    toast(err.message);
+  }
+});
+
+function applyAiFields(f) {
+  const form = $('#add-form');
+  if (f.topLevelWbs) { form.topLevelWbs.value = f.topLevelWbs; updateSubtaskOptions(); }
+  if (f.existingSubtaskWbs) form.existingSubtaskWbs.value = f.existingSubtaskWbs;
+  if (f.newSubtaskTitle) form.newSubtaskTitle.value = f.newSubtaskTitle;
+  if (f.title) form.title.value = f.title;
+  if (f.startDate) form.startDate.value = f.startDate;
+  if (f.deadline) form.deadline.value = f.deadline;
+  if (f.lead) form.lead.value = f.lead;
+  if (f.status) form.status.value = f.status;
+  if (f.weight) form.weight.value = String(f.weight);
+  if (f.pct != null && f.pct !== '') form.pct.value = String(f.pct);
+  if (f.notes) form.notes.value = f.notes;
+}
+
 /* ---------------- export dropdown ---------------- */
 const exportToggle = $('#export-toggle');
 const exportDropdown = $('#export-dropdown');
@@ -546,3 +631,4 @@ async function refreshAll() {
 }
 $('#nm-date').value = todayISOClient();
 refreshAll().catch(err => toast(err.message));
+initAiFillPanel().catch(() => {});

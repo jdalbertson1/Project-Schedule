@@ -143,6 +143,15 @@
 
   <!-- ADD TASK -->
   <section id="view-add" class="view">
+    <div class="panel form-panel ai-fill-panel" id="ai-fill-panel" hidden>
+      <h2>Fill with AI <span class="opt">describe the task out loud or in writing</span></h2>
+      <div class="ai-fill-row">
+        <button type="button" class="btn" id="ai-mic-btn">🎤 Start speaking</button>
+        <textarea id="ai-transcript" rows="2" placeholder='Or type it here: e.g. "Josh needs to draft the security plan outline by next Friday, medium priority"'></textarea>
+        <button type="button" class="btn btn-primary" id="ai-fill-btn">Fill form</button>
+      </div>
+      <p class="hint" id="ai-status-msg"></p>
+    </div>
     <div class="panel form-panel">
       <h2>Add a schedule line</h2>
       <p class="hint">The new line is numbered and inserted into the schedule automatically — same behavior as the old Submit Task button, no macros required.</p>

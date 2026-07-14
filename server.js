@@ -8,6 +8,7 @@ const { buildScheduleWorkbook } = require('./lib/exportXlsx');
 const { buildMeetingDocx } = require('./lib/exportDocx');
 const { buildMeetingPdf } = require('./lib/exportPdf');
 const dropbox = require('./lib/dropbox');
+const aiTaskFill = require('./lib/aiTaskFill');
 
 const app = express();
 app.use(express.json());
@@ -189,6 +190,23 @@ app.get('/api/lists', async (req, res, next) => {
     const subtasks = rows.filter(r => wbsLevel(r.wbs) === 2 && !r.is_leaf)
       .map(r => ({ wbs: r.wbs, title: r.title, top: r.wbs.split('.')[0] }));
     res.json({ statuses: STATUSES, weights: WEIGHTS, leads, topLevel, subtasks });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/ai/status', (req, res) => {
+  res.json({ configured: aiTaskFill.isConfigured() });
+});
+
+app.post('/api/ai/parse-task', async (req, res, next) => {
+  try {
+    const transcript = String((req.body && req.body.transcript) || '').trim();
+    if (!transcript) return res.status(400).json({ error: 'Say or type a statement first.' });
+    const rows = await computedTasks();
+    const topLevel = rows.filter(r => wbsLevel(r.wbs) === 1).map(r => ({ wbs: r.wbs, title: r.title }));
+    const subtasks = rows.filter(r => wbsLevel(r.wbs) === 2 && !r.is_leaf).map(r => ({ wbs: r.wbs, title: r.title, top: r.wbs.split('.')[0] }));
+    const leads = [...new Set(rows.map(r => r.lead).filter(Boolean))].sort();
+    const fields = await aiTaskFill.parseTaskStatement(transcript, { today: todayISO(), topLevel, subtasks, leads });
+    res.json(fields);
   } catch (e) { next(e); }
 });
 

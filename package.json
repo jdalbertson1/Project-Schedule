@@ -11,6 +11,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
     "better-sqlite3": "^11.3.0",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
