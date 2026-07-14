@@ -4,6 +4,10 @@
 const express = require('express');
 const path = require('path');
 const { query, init, usePg } = require('./db');
+const { buildScheduleWorkbook } = require('./lib/exportXlsx');
+const { buildMeetingDocx } = require('./lib/exportDocx');
+const { buildMeetingPdf } = require('./lib/exportPdf');
+const dropbox = require('./lib/dropbox');
 
 const app = express();
 app.use(express.json());
@@ -89,6 +93,37 @@ function addDays(iso, days) {
   return d.toISOString().slice(0, 10);
 }
 
+// Leaf tasks due within 14 days of `asOf` (inclusive) that aren't complete yet.
+// Used by both the dashboard ("due next 14 days") and meeting agendas
+// (the "upcoming two weeks" snapshot as of the meeting date).
+function nearTermSnapshot(rows, asOf) {
+  const horizon = addDays(asOf, 14);
+  return rows.filter(r => r.is_leaf)
+    .filter(l => l.deadline && l.deadline >= asOf && l.deadline <= horizon && (l.pct || 0) < 1)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+}
+
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtDateLong(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
+// The starting document for a new agenda: a snapshot of what's due in the
+// next two weeks (as of the chosen meeting date), then an empty section for
+// discussion items the user adds before/during the meeting.
+function buildAgendaHtml(rows, meetingDate) {
+  const snapshot = nearTermSnapshot(rows, meetingDate);
+  const items = snapshot.length
+    ? snapshot.map(l => `<li><strong>${escHtml(l.wbs)}</strong> ${escHtml(l.title)} — ${escHtml(l.lead || 'Unassigned')} — due ${escHtml(fmtDateLong(l.deadline))} (${Math.round((l.pct || 0) * 100)}%)</li>`).join('')
+    : '<li><em>Nothing due in the next two weeks.</em></li>';
+  return `<h2>Upcoming two weeks (as of ${escHtml(fmtDateLong(meetingDate))})</h2><ul>${items}</ul><h2>Discussion items</h2><ul><li><br></li></ul>`;
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -104,11 +139,7 @@ app.get('/api/dashboard', async (req, res, next) => {
     const rows = await computedTasks();
     const leaves = rows.filter(r => r.is_leaf);
     const today = todayISO();
-    const horizon = addDays(today, 14);
-
-    const dueSoon = leaves.filter(l =>
-      l.deadline && l.deadline >= today && l.deadline <= horizon && (l.pct || 0) < 1
-    );
+    const dueSoon = nearTermSnapshot(rows, today);
 
     const phases = rows.filter(r => !r.wbs.includes('.')).map(p => ({
       wbs: p.wbs, title: p.title, phase: p.phase,
@@ -125,7 +156,7 @@ app.get('/api/dashboard', async (req, res, next) => {
       complete: leaves.filter(l => l.status === 'Complete').length,
       total_leaves: leaves.length,
       phases,
-      near_term: dueSoon.sort((a, b) => a.deadline.localeCompare(b.deadline)),
+      near_term: dueSoon,
       overdue: leaves.filter(l => l.deadline && l.deadline < today && (l.pct || 0) < 1)
         .sort((a, b) => a.deadline.localeCompare(b.deadline)),
     });
@@ -328,6 +359,142 @@ app.get('/api/export.csv', async (req, res, next) => {
     res.set('Content-Type', 'text/csv');
     res.set('Content-Disposition', 'attachment; filename="EZData_Schedule.csv"');
     res.send([header, ...lines].join('\n'));
+  } catch (e) { next(e); }
+});
+
+// Excel export — mirrors the on-screen formatting (row shading, status/weight
+// chips, phase colors) and includes the Gantt bars as filled month cells.
+app.get('/api/export.xlsx', async (req, res, next) => {
+  try {
+    const rows = await computedTasks();
+    const buf = await buildScheduleWorkbook(rows);
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Content-Disposition', 'attachment; filename="EZData_Schedule.xlsx"');
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+// ---------------------------------------------------------------------------
+// Meetings — agendas that turn into minutes
+// ---------------------------------------------------------------------------
+
+function slugFilename(meeting, ext) {
+  const safe = meeting.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Meeting';
+  return `${meeting.meeting_date}_${safe}.${ext}`;
+}
+
+app.get('/api/meetings', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT id, title, meeting_date, created_at, updated_at FROM meetings ORDER BY meeting_date DESC, id DESC');
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/meetings/:id', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM meetings WHERE id = ?', [Number(req.params.id)]);
+    if (!rows.length) return res.status(404).json({ error: 'Meeting not found.' });
+    res.json(rows[0]);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/meetings', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const meetingDate = String(b.meetingDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate)) return res.status(400).json({ error: 'Enter a valid meeting date.' });
+    const title = String(b.title || '').trim() || `Meeting — ${fmtDateLong(meetingDate)}`;
+
+    const rows = await computedTasks();
+    const contentHtml = buildAgendaHtml(rows, meetingDate);
+    const now = new Date().toISOString();
+
+    const inserted = await query(
+      `INSERT INTO meetings (title, meeting_date, content_html, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?) ${usePg ? 'RETURNING id' : ''}`,
+      [title, meetingDate, contentHtml, now, now]
+    );
+    let id;
+    if (usePg) {
+      id = inserted[0].id;
+    } else {
+      const latest = await query('SELECT id FROM meetings ORDER BY id DESC LIMIT 1');
+      id = latest[0].id;
+    }
+    const created = await query('SELECT * FROM meetings WHERE id = ?', [id]);
+    res.status(201).json(created[0]);
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/meetings/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await query('SELECT * FROM meetings WHERE id = ?', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Meeting not found.' });
+    const b = req.body || {};
+    const fields = {};
+    if (b.title !== undefined) fields.title = String(b.title).trim() || existing[0].title;
+    if (b.content_html !== undefined) fields.content_html = String(b.content_html);
+    const keys = Object.keys(fields);
+    if (!keys.length) return res.json({ ok: true });
+    fields.updated_at = new Date().toISOString();
+    const allKeys = [...keys, 'updated_at'];
+    const setSql = allKeys.map(k => `${k} = ?`).join(', ');
+    await query(`UPDATE meetings SET ${setSql} WHERE id = ?`, [...allKeys.map(k => fields[k]), id]);
+    res.json({ ok: true, updated_at: fields.updated_at });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/meetings/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await query('SELECT id FROM meetings WHERE id = ?', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Meeting not found.' });
+    await query('DELETE FROM meetings WHERE id = ?', [id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+async function loadMeetingOr404(req, res) {
+  const rows = await query('SELECT * FROM meetings WHERE id = ?', [Number(req.params.id)]);
+  if (!rows.length) { res.status(404).json({ error: 'Meeting not found.' }); return null; }
+  return rows[0];
+}
+
+app.get('/api/meetings/:id/export.docx', async (req, res, next) => {
+  try {
+    const meeting = await loadMeetingOr404(req, res);
+    if (!meeting) return;
+    const buf = await buildMeetingDocx(meeting);
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.set('Content-Disposition', `attachment; filename="${slugFilename(meeting, 'docx')}"`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/meetings/:id/export.pdf', async (req, res, next) => {
+  try {
+    const meeting = await loadMeetingOr404(req, res);
+    if (!meeting) return;
+    const buf = await buildMeetingPdf(meeting);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="${slugFilename(meeting, 'pdf')}"`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/dropbox/status', (req, res) => {
+  res.json({ configured: dropbox.isConfigured() });
+});
+
+app.post('/api/meetings/:id/dropbox', async (req, res, next) => {
+  try {
+    const meeting = await loadMeetingOr404(req, res);
+    if (!meeting) return;
+    const format = req.body && req.body.format === 'pdf' ? 'pdf' : 'docx';
+    const buf = format === 'pdf' ? await buildMeetingPdf(meeting) : await buildMeetingDocx(meeting);
+    const result = await dropbox.uploadToDropbox(slugFilename(meeting, format), buf);
+    res.json({ ok: true, path: result.path_display });
   } catch (e) { next(e); }
 });
 

@@ -26,7 +26,14 @@
     <button class="tab active" data-view="dashboard" role="tab">Dashboard</button>
     <button class="tab" data-view="schedule" role="tab">Schedule</button>
     <button class="tab" data-view="add" role="tab">Add task</button>
-    <a class="tab tab-link" href="/api/export.csv" download>Export CSV</a>
+    <button class="tab" data-view="meetings" role="tab">Meetings</button>
+    <span class="tab-link export-menu">
+      <button class="tab export-toggle" id="export-toggle" aria-haspopup="true" aria-expanded="false">Export ▾</button>
+      <span class="export-dropdown" id="export-dropdown" hidden>
+        <a href="/api/export.csv" download>CSV</a>
+        <a href="/api/export.xlsx" download>Excel (.xlsx)</a>
+      </span>
+    </span>
   </nav>
 </header>
 
@@ -77,6 +84,52 @@
           <tbody></tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+  <!-- MEETINGS -->
+  <section id="view-meetings" class="view">
+    <div class="panel" id="meetings-list-panel">
+      <div class="panel-head">
+        <h2>Meeting agendas &amp; notes</h2>
+        <p class="hint">Every agenda opens with a snapshot of what's due in the next two weeks. Add items, then mark up the agenda during the meeting to turn it into notes.</p>
+      </div>
+      <form id="new-meeting-form" class="new-meeting-row">
+        <label>Meeting date
+          <input type="date" name="meetingDate" id="nm-date" required>
+        </label>
+        <label>Title <span class="opt">optional</span>
+          <input type="text" name="title" id="nm-title" placeholder="e.g. Weekly check-in">
+        </label>
+        <button type="submit" class="btn btn-primary">New agenda</button>
+      </form>
+      <table class="data-table" id="meetings-table">
+        <thead><tr><th>Date</th><th>Title</th><th>Status</th><th>Last updated</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="empty-msg" id="meetings-empty" hidden>No meetings yet — create your first agenda above.</p>
+    </div>
+
+    <div class="panel" id="meeting-editor-panel" hidden>
+      <div class="panel-head">
+        <div>
+          <button type="button" class="link-back" id="meeting-back">← All meetings</button>
+          <h2 id="meeting-editor-title">Meeting</h2>
+          <p class="hint" id="meeting-editor-date"></p>
+        </div>
+        <div class="meeting-toolbar">
+          <button type="button" class="btn" id="meeting-mode-toggle">🖊 Meeting mode: off</button>
+          <button type="button" class="btn" id="meeting-add-item">+ Agenda item</button>
+          <button type="button" class="btn btn-primary" id="meeting-save">Save</button>
+        </div>
+        <div class="meeting-toolbar">
+          <a class="btn" id="meeting-dl-docx">Download Word</a>
+          <a class="btn" id="meeting-dl-pdf">Download PDF</a>
+          <button type="button" class="btn" id="meeting-dropbox">Send to Dropbox</button>
+          <span class="form-msg" id="meeting-msg" role="status"></span>
+        </div>
+      </div>
+      <div class="meeting-doc" id="meeting-doc" contenteditable="true"></div>
     </div>
   </section>
 

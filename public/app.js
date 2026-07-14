@@ -266,8 +266,168 @@ $('#add-form').addEventListener('submit', async e => {
   }
 });
 
+/* ---------------- export dropdown ---------------- */
+const exportToggle = $('#export-toggle');
+const exportDropdown = $('#export-dropdown');
+exportToggle.addEventListener('click', e => {
+  e.stopPropagation();
+  const opening = exportDropdown.hidden;
+  exportDropdown.hidden = !opening;
+  exportToggle.setAttribute('aria-expanded', String(opening));
+});
+exportDropdown.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => {
+  exportDropdown.hidden = true;
+  exportToggle.setAttribute('aria-expanded', 'false');
+});
+
+/* ---------------- meetings ---------------- */
+const MEETING_NOTE_COLOR = '#0e8a74'; // teal — visually distinct "written live in the meeting" color
+let meetingModeOn = false;
+let currentMeetingId = null;
+
+function meetingStatusChip(m) {
+  return m.updated_at !== m.created_at
+    ? '<span class="status-chip status-InProgress">Edited</span>'
+    : '<span class="status-chip status-NotStarted">Agenda only</span>';
+}
+
+async function renderMeetingsList() {
+  const meetings = await api('/api/meetings');
+  const tbody = $('#meetings-table tbody');
+  tbody.innerHTML = meetings.map(m => `
+    <tr data-id="${m.id}">
+      <td class="mono">${fmtDate(m.meeting_date)}</td>
+      <td>${esc(m.title)}</td>
+      <td>${meetingStatusChip(m)}</td>
+      <td class="mono">${new Date(m.updated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
+      <td class="actions-cell"><div class="row-actions"><button data-act="open">Open</button><button data-act="delete-meeting">Delete</button></div></td>
+    </tr>`).join('');
+  $('#meetings-empty').hidden = meetings.length > 0;
+  $('#meetings-table').hidden = meetings.length === 0;
+}
+
+$('#meetings-table tbody').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const tr = btn.closest('tr[data-id]');
+  const id = tr.dataset.id;
+  if (btn.dataset.act === 'open') { openMeeting(id); return; }
+  if (btn.dataset.act === 'delete-meeting') {
+    if (!confirm('Delete this meeting record? This cannot be undone.')) return;
+    try {
+      await api(`/api/meetings/${id}`, { method: 'DELETE' });
+      toast('Meeting deleted');
+      await renderMeetingsList();
+    } catch (err) { toast(err.message); }
+  }
+});
+
+$('#new-meeting-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const meetingDate = $('#nm-date').value;
+  const title = $('#nm-title').value;
+  if (!meetingDate) { toast('Pick a meeting date'); return; }
+  try {
+    const m = await api('/api/meetings', { method: 'POST', body: JSON.stringify({ meetingDate, title }) });
+    e.target.reset();
+    $('#nm-date').value = todayISOClient();
+    await renderMeetingsList();
+    toast('Agenda created');
+    openMeeting(m.id);
+  } catch (err) { toast(err.message); }
+});
+
+function todayISOClient() {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function updateMeetingModeButton() {
+  const btn = $('#meeting-mode-toggle');
+  btn.textContent = meetingModeOn ? '🖊 Meeting mode: ON' : '🖊 Meeting mode: off';
+  btn.classList.toggle('meeting-mode-active', meetingModeOn);
+}
+
+async function openMeeting(id) {
+  const m = await api(`/api/meetings/${id}`);
+  currentMeetingId = m.id;
+  meetingModeOn = false;
+  updateMeetingModeButton();
+  $('#meeting-editor-title').textContent = m.title;
+  $('#meeting-editor-date').textContent = fmtDate(m.meeting_date);
+  $('#meeting-doc').innerHTML = m.content_html || '';
+  $('#meeting-dl-docx').href = `/api/meetings/${id}/export.docx`;
+  $('#meeting-dl-pdf').href = `/api/meetings/${id}/export.pdf`;
+  $('#meeting-msg').textContent = '';
+  $('#meetings-list-panel').hidden = true;
+  $('#meeting-editor-panel').hidden = false;
+}
+
+$('#meeting-back').addEventListener('click', () => {
+  $('#meeting-editor-panel').hidden = true;
+  $('#meetings-list-panel').hidden = false;
+  currentMeetingId = null;
+});
+
+$('#meeting-mode-toggle').addEventListener('click', () => {
+  meetingModeOn = !meetingModeOn;
+  updateMeetingModeButton();
+  $('#meeting-doc').focus();
+  document.execCommand('styleWithCSS', false, true);
+  document.execCommand('foreColor', false, meetingModeOn ? MEETING_NOTE_COLOR : '#1b2733');
+});
+
+$('#meeting-add-item').addEventListener('click', () => {
+  const doc = $('#meeting-doc');
+  doc.focus();
+  let target = doc.querySelector('ul:last-of-type');
+  if (!target) {
+    doc.insertAdjacentHTML('beforeend', '<h2>Discussion items</h2><ul></ul>');
+    target = doc.querySelector('ul:last-of-type');
+  }
+  const li = document.createElement('li');
+  li.innerHTML = '<br>';
+  target.appendChild(li);
+  const range = document.createRange();
+  range.selectNodeContents(li);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+});
+
+async function saveMeetingNotes() {
+  if (!currentMeetingId) return;
+  await api(`/api/meetings/${currentMeetingId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content_html: $('#meeting-doc').innerHTML }),
+  });
+}
+
+$('#meeting-save').addEventListener('click', async () => {
+  try {
+    await saveMeetingNotes();
+    $('#meeting-msg').textContent = 'Saved ' + new Date().toLocaleTimeString();
+    $('#meeting-msg').classList.add('ok');
+    await renderMeetingsList();
+  } catch (err) { toast(err.message); }
+});
+
+$('#meeting-dropbox').addEventListener('click', async () => {
+  if (!currentMeetingId) return;
+  try {
+    const status = await api('/api/dropbox/status');
+    if (!status.configured) { toast('Dropbox is not connected yet.'); return; }
+    await saveMeetingNotes();
+    const out = await api(`/api/meetings/${currentMeetingId}/dropbox`, { method: 'POST', body: JSON.stringify({ format: 'docx' }) });
+    toast(`Sent to Dropbox: ${out.path}`);
+  } catch (err) { toast(err.message); }
+});
+
 /* ---------------- boot ---------------- */
 async function refreshAll() {
-  await Promise.all([renderDashboard(), renderSchedule(), renderLists()]);
+  await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList()]);
 }
+$('#nm-date').value = todayISOClient();
 refreshAll().catch(err => toast(err.message));

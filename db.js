@@ -59,6 +59,15 @@ async function init() {
     if (!/already exists|duplicate column/i.test(e.message)) throw e;
   }
 
+  await query(`CREATE TABLE IF NOT EXISTS meetings (
+    ${idCol},
+    title TEXT NOT NULL,
+    meeting_date TEXT NOT NULL,
+    content_html TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   const existing = await query('SELECT COUNT(*) AS n FROM tasks');
   const n = Number(existing[0].n);
   if (n === 0) {
