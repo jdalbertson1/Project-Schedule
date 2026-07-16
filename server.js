@@ -9,6 +9,7 @@ const { buildMeetingDocx } = require('./lib/exportDocx');
 const { buildMeetingPdf } = require('./lib/exportPdf');
 const dropbox = require('./lib/dropbox');
 const aiTaskFill = require('./lib/aiTaskFill');
+const { computeMove } = require('./lib/taskMove');
 
 const app = express();
 app.use(express.json());
@@ -114,12 +115,11 @@ function fmtDateLong(iso) {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
-// The starting document for a new agenda: an EZData section with a snapshot
-// of what's due in the next two weeks (as of the chosen meeting date)
-// rendered as a table — the same columns as the dashboard's near-term-actions
-// table — plus an empty discussion-items list, followed by a second section
-// for NEORide Technology On-Call Projects with just a discussion placeholder.
-function buildAgendaHtml(rows, meetingDate) {
+// The "upcoming two weeks" table alone — same columns as the dashboard's
+// near-term-actions table. Split out from buildAgendaHtml so it can also be
+// used to refresh just this table inside an already-created meeting's saved
+// content_html (see syncFutureMeetingSnapshots below).
+function buildSnapshotTable(rows, meetingDate) {
   const snapshot = nearTermSnapshot(rows, meetingDate);
   const tableBody = snapshot.length
     ? snapshot.map(l => `<tr>
@@ -133,12 +133,44 @@ function buildAgendaHtml(rows, meetingDate) {
         <td>${escHtml(l.notes || '')}</td>
       </tr>`).join('')
     : '<tr><td colspan="8"><em>Nothing due in the next two weeks.</em></td></tr>';
-  const table = `<table><thead><tr><th>WBS</th><th>Task / Subtask</th><th>Lead</th><th>Start</th><th>Deadline</th><th>Status</th><th>%</th><th>Notes</th></tr></thead><tbody>${tableBody}</tbody></table>`;
+  return `<table><thead><tr><th>WBS</th><th>Task / Subtask</th><th>Lead</th><th>Start</th><th>Deadline</th><th>Status</th><th>%</th><th>Notes</th></tr></thead><tbody>${tableBody}</tbody></table>`;
+}
+
+// The starting document for a new agenda: an EZData section with a snapshot
+// of what's due in the next two weeks (as of the chosen meeting date)
+// rendered as a table, plus an empty discussion-items list, followed by a
+// second section for NEORide Technology On-Call Projects with just a
+// discussion placeholder.
+function buildAgendaHtml(rows, meetingDate) {
+  const table = buildSnapshotTable(rows, meetingDate);
   return `<h2>EZData</h2>`
     + `<h3>Upcoming two weeks (as of ${escHtml(fmtDateLong(meetingDate))})</h3>${table}`
     + `<h3>Discussion items</h3><ul><li><br></li></ul>`
     + `<h2>NEORide Technology On-Call Projects</h2>`
     + `<h3>Discussion items</h3><ul><li><br></li></ul>`;
+}
+
+// Refreshes the "upcoming two weeks" table inside every meeting whose date
+// hasn't passed yet — called after any schedule change. Meetings in the past
+// are historical records and are never touched. Only the first <table> in
+// the saved content_html is replaced; everything else the user added
+// (discussion items, notes, formatting, the On-Call section) is untouched.
+// If the user deleted the table entirely, we leave it deleted rather than
+// re-inserting one.
+async function syncFutureMeetingSnapshots() {
+  const today = todayISO();
+  const meetings = await query('SELECT * FROM meetings WHERE meeting_date >= ?', [today]);
+  if (!meetings.length) return;
+  const rows = await computedTasks();
+  const now = new Date().toISOString();
+  for (const m of meetings) {
+    if (!/<table>/.test(m.content_html || '')) continue;
+    const newTable = buildSnapshotTable(rows, m.meeting_date);
+    const updated = m.content_html.replace(/<table>[\s\S]*?<\/table>/, newTable);
+    if (updated !== m.content_html) {
+      await query('UPDATE meetings SET content_html = ?, updated_at = ? WHERE id = ?', [updated, now, m.id]);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +339,7 @@ app.post('/api/tasks', async (req, res, next) => {
       for (let i = ins.at + 1; i < rows.length; i++) rows[i].sort += 1;
     }
 
+    await syncFutureMeetingSnapshots();
     res.status(201).json({ ok: true, wbs: newWbs });
   } catch (e) { next(e); }
 });
@@ -354,6 +387,7 @@ app.patch('/api/tasks/:id', async (req, res, next) => {
     if (!keys.length) return res.json({ ok: true });
     const setSql = keys.map(k => `${k} = ?`).join(', ');
     await query(`UPDATE tasks SET ${setSql} WHERE id = ?`, [...keys.map(k => fields[k]), id]);
+    await syncFutureMeetingSnapshots();
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -372,7 +406,32 @@ app.delete('/api/tasks/:id', async (req, res, next) => {
     }
     for (const c of children) await query('DELETE FROM tasks WHERE id = ?', [c.id]);
     await query('DELETE FROM tasks WHERE id = ?', [id]);
+    await syncFutureMeetingSnapshots();
     res.json({ ok: true, deleted: 1 + children.length });
+  } catch (e) { next(e); }
+});
+
+// Drag-and-drop restructuring: move a task (and its whole subtree, if it has
+// one) before, after, or inside another task. WBS numbers, sort order, and
+// phase inheritance are fully recomputed — rollups/Gantt position/is_leaf
+// status all update for free since those are derived from wbs on every read.
+// Body: { targetId, position: 'before' | 'after' | 'into' }
+app.post('/api/tasks/:id/move', async (req, res, next) => {
+  try {
+    const draggedId = Number(req.params.id);
+    const targetId = Number(req.body && req.body.targetId);
+    const position = req.body && req.body.position;
+    if (!targetId) return res.status(400).json({ error: 'Missing drop target.' });
+
+    const rows = await query('SELECT * FROM tasks');
+    const result = computeMove(rows, draggedId, targetId, position);
+    if (result.error) return res.status(400).json({ error: result.error });
+
+    for (const [id, change] of result.changes) {
+      await query('UPDATE tasks SET wbs = ?, sort = ?, phase = ? WHERE id = ?', [change.wbs, change.sort, change.phase, id]);
+    }
+    await syncFutureMeetingSnapshots();
+    res.json({ ok: true, changed: result.changes.size });
   } catch (e) { next(e); }
 });
 

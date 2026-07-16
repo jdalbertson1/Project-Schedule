@@ -123,8 +123,11 @@ function monthRange(rows) {
   return months;
 }
 
+let SCHEDULE_ROWS = [];
+
 async function renderSchedule() {
   const rows = await api('/api/schedule');
+  SCHEDULE_ROWS = rows;
   const months = monthRange(rows);
   const thisMonth = new Date().toISOString().slice(0, 7);
 
@@ -153,7 +156,7 @@ async function renderSchedule() {
     }).join('');
     return `
     <tr data-id="${r.id}" class="${rowCls}">
-      <td class="mono sticky-col"><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
+      <td class="mono sticky-col"><span class="drag-handle" draggable="true" title="Drag to reorder or nest under another task">⋮⋮</span><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
       <td class="title-cell sticky-col-2"><span class="indent-${Math.min(level, 4)}">${esc(r.title)}</span></td>
       <td>${esc(r.lead || '')}</td>
       <td class="mono">${fmtDate(r.start_date)}</td>
@@ -167,6 +170,75 @@ async function renderSchedule() {
     </tr>`;
   }).join('');
 }
+
+/* ---------------- schedule drag-and-drop reorder / reparent ---------------- */
+let dragSourceId = null;
+const scheduleBody = $('#schedule-table tbody');
+
+function isValidDropTarget(sourceId, targetId) {
+  if (sourceId === targetId) return false;
+  const source = SCHEDULE_ROWS.find(r => r.id === sourceId);
+  const target = SCHEDULE_ROWS.find(r => r.id === targetId);
+  if (!source || !target) return false;
+  if (target.wbs === source.wbs || target.wbs.startsWith(source.wbs + '.')) return false;
+  return true;
+}
+
+function clearDropIndicators() {
+  $$('tr[data-id]', scheduleBody).forEach(el => {
+    el.classList.remove('drop-before', 'drop-after', 'drop-into');
+    delete el.dataset.dropZone;
+  });
+}
+
+scheduleBody.addEventListener('dragstart', e => {
+  const handle = e.target.closest('.drag-handle');
+  const tr = handle && handle.closest('tr[data-id]');
+  if (!tr) { e.preventDefault(); return; }
+  dragSourceId = Number(tr.dataset.id);
+  tr.classList.add('drag-source');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(dragSourceId));
+  e.dataTransfer.setDragImage(tr, 20, 16);
+});
+
+scheduleBody.addEventListener('dragover', e => {
+  if (dragSourceId == null) return;
+  const tr = e.target.closest('tr[data-id]');
+  clearDropIndicators();
+  if (!tr) return;
+  const targetId = Number(tr.dataset.id);
+  if (!isValidDropTarget(dragSourceId, targetId)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const rect = tr.getBoundingClientRect();
+  const relY = (e.clientY - rect.top) / rect.height;
+  const zone = relY < 0.25 ? 'before' : relY > 0.75 ? 'after' : 'into';
+  tr.classList.add(`drop-${zone}`);
+  tr.dataset.dropZone = zone;
+});
+
+scheduleBody.addEventListener('drop', async e => {
+  e.preventDefault();
+  const tr = e.target.closest('tr[data-id]');
+  const zone = tr && tr.dataset.dropZone;
+  const targetId = tr && Number(tr.dataset.id);
+  clearDropIndicators();
+  const sourceId = dragSourceId;
+  dragSourceId = null;
+  if (!tr || !zone || sourceId == null || !isValidDropTarget(sourceId, targetId)) return;
+  try {
+    await api(`/api/tasks/${sourceId}/move`, { method: 'POST', body: JSON.stringify({ targetId, position: zone }) });
+    toast('Task moved');
+    await refreshAll();
+  } catch (err) { toast(err.message); }
+});
+
+scheduleBody.addEventListener('dragend', () => {
+  clearDropIndicators();
+  $$('tr.drag-source', scheduleBody).forEach(el => el.classList.remove('drag-source'));
+  dragSourceId = null;
+});
 
 // inline edit
 document.addEventListener('click', async e => {
