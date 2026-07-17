@@ -79,7 +79,7 @@
         <table class="data-table schedule-table" id="schedule-table">
           <thead><tr id="schedule-head">
             <th class="mono sticky-col">WBS</th><th class="sticky-col-2">Task / Subtask</th><th>Lead</th>
-            <th>Start</th><th>Deadline</th><th>Status</th><th>Weight</th><th class="num">%</th><th>Notes</th><th></th>
+            <th>Start</th><th>Deadline</th><th>Status</th><th title="Task duration in days — used to weight this task's contribution to its parent's rollup">Weight</th><th class="num">%</th><th>Notes</th><th></th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -179,14 +179,11 @@
             <input type="text" name="lead" list="leads-list" placeholder="Select or type a name">
             <datalist id="leads-list"></datalist>
           </label>
-          <label>Status <span class="opt">defaults from % complete</span>
-            <select name="status"><option value="">Auto</option></select>
-          </label>
-          <label>Weight <span class="opt">how much this line counts toward its parent's rollup</span>
-            <select name="weight" id="f-weight"></select>
+          <label>Status <span class="opt">defaults from % complete — Complete always sets 100%</span>
+            <select name="status" id="f-status"><option value="">Auto</option></select>
           </label>
           <label>% Complete
-            <input type="number" name="pct" min="0" max="100" step="5" placeholder="0">
+            <input type="number" name="pct" min="0" max="100" step="5" placeholder="0" id="f-pct">
           </label>
           <label class="span-2">Notes
             <input type="text" name="notes" placeholder="Optional notes for the schedule line">

@@ -42,10 +42,8 @@ function pctCell(pct) {
   return `<span class="pct-cell"><span class="pct-bar"><i style="width:${Math.round(pct * 100)}%"></i></span>${fmtPct(pct)}</span>`;
 }
 
-const WEIGHT_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High' };
 function weightChip(w) {
-  const v = w == null ? 2 : Number(w);
-  return `<span class="weight-chip weight-${v}">${WEIGHT_LABELS[v] || 'Medium'}</span>`;
+  return `<span class="weight-chip">${w}d</span>`;
 }
 
 /* ---------------- tabs ---------------- */
@@ -264,18 +262,20 @@ document.addEventListener('click', async e => {
     if (!r) return;
     tr.classList.add('editing');
     const statusOpts = LISTS.statuses.map(s => `<option ${s === r.status ? 'selected' : ''}>${s}</option>`).join('');
-    const weightVal = r.weight == null ? 2 : Number(r.weight);
-    const weightOpts = LISTS.weights.map(w => `<option value="${w.value}" ${w.value === weightVal ? 'selected' : ''}>${w.label}</option>`).join('');
     const cells = tr.children;
     cells[1].innerHTML = `<input name="title" value="${esc(r.title)}">`;
     cells[2].innerHTML = `<input name="lead" value="${esc(r.lead || '')}" list="leads-list">`;
     cells[3].innerHTML = `<input type="date" name="startDate" value="${r.start_date || ''}">`;
     cells[4].innerHTML = `<input type="date" name="deadline" value="${r.deadline || ''}">`;
     cells[5].innerHTML = `<select name="status">${statusOpts}</select>`;
-    cells[6].innerHTML = `<select name="weight">${weightOpts}</select>`;
+    cells[6].innerHTML = weightChip(r.weight);
     cells[7].innerHTML = `<input type="number" name="pct" min="0" max="100" step="5" value="${Math.round((r.pct || 0) * 100)}" style="max-width:70px">`;
     cells[8].innerHTML = `<input name="notes" value="${esc(r.notes || '')}">`;
     cells[9].innerHTML = `<div class="row-actions"><button data-act="save">Save</button><button data-act="cancel">Cancel</button></div>`;
+    // Marking a task Complete always means 100% — reflect that immediately in the field.
+    tr.querySelector('[name="status"]').addEventListener('change', e => {
+      if (e.target.value === 'Complete') tr.querySelector('[name="pct"]').value = 100;
+    });
     return;
   }
 
@@ -288,7 +288,7 @@ document.addEventListener('click', async e => {
         method: 'PATCH',
         body: JSON.stringify({
           title: val('title'), lead: val('lead'), startDate: val('startDate'),
-          deadline: val('deadline'), status: val('status'), weight: Number(val('weight')),
+          deadline: val('deadline'), status: val('status'),
           pct: Number(val('pct')) / 100, notes: val('notes'),
         }),
       });
@@ -307,9 +307,13 @@ async function renderLists() {
   const statusSel = $('#add-form [name="status"]');
   statusSel.innerHTML = '<option value="">Auto (from % complete)</option>' +
     LISTS.statuses.map(s => `<option>${s}</option>`).join('');
-  $('#f-weight').innerHTML = LISTS.weights.map(w => `<option value="${w.value}" ${w.value === 2 ? 'selected' : ''}>${w.label}</option>`).join('');
   updateSubtaskOptions();
 }
+
+// Marking a task Complete always means 100% — reflect that immediately in the field.
+$('#f-status').addEventListener('change', e => {
+  if (e.target.value === 'Complete') $('#f-pct').value = 100;
+});
 
 function updateSubtaskOptions() {
   const top = $('#f-top').value;
@@ -418,8 +422,8 @@ function applyAiFields(f) {
   if (f.deadline) form.deadline.value = f.deadline;
   if (f.lead) form.lead.value = f.lead;
   if (f.status) form.status.value = f.status;
-  if (f.weight) form.weight.value = String(f.weight);
   if (f.pct != null && f.pct !== '') form.pct.value = String(f.pct);
+  if (f.status === 'Complete') form.pct.value = 100;
   if (f.notes) form.notes.value = f.notes;
 }
 

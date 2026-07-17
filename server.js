@@ -35,14 +35,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ---------------------------------------------------------------------------
 
 const STATUSES = ['Not Started', 'In Progress', 'Complete'];
-const WEIGHTS = [{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }];
-const WEIGHT_VALUES = WEIGHTS.map(w => w.value);
-const WEIGHT_LABELS = Object.fromEntries(WEIGHTS.map(w => [w.value, w.label]));
 
 function statusFromPct(pct) {
   if (pct >= 1) return 'Complete';
   if (pct > 0) return 'In Progress';
   return 'Not Started';
+}
+
+// Weight = how many days a task spans (inclusive), minimum 1. A 1-day task
+// counts for 1 toward its parent's rollup; a 1000-day task counts for 1000 —
+// so being 1% through a year-long task moves the needle more than finishing
+// a one-off small task does. Purely derived from dates, never stored.
+function computeWeight(startDate, deadline) {
+  if (!startDate || !deadline) return 1;
+  const start = new Date(startDate + 'T00:00:00Z');
+  const end = new Date(deadline + 'T00:00:00Z');
+  const days = Math.round((end - start) / 86400000) + 1;
+  return Math.max(1, days);
 }
 
 function wbsLevel(wbs) {
@@ -57,7 +66,7 @@ async function computedTasks() {
 
   for (const r of rows) {
     r.pct = r.pct === null || r.pct === undefined ? null : Number(r.pct);
-    r.weight = r.weight === null || r.weight === undefined ? 2 : Number(r.weight);
+    r.weight = computeWeight(r.start_date, r.deadline);
     const prefix = r.wbs + '.';
     r.is_leaf = !wbsList.some(w => w.startsWith(prefix));
   }
@@ -66,6 +75,7 @@ async function computedTasks() {
     if (r.is_leaf) {
       if (r.pct === null) r.pct = 0;
       if (!r.status) r.status = statusFromPct(r.pct);
+      if (r.status === 'Complete') r.pct = 1;
       continue;
     }
     // Parent: roll up from leaf descendants (same as MIN/MAX/SUMPRODUCT formulas),
@@ -221,7 +231,7 @@ app.get('/api/lists', async (req, res, next) => {
       .map(r => ({ wbs: r.wbs, title: r.title }));
     const subtasks = rows.filter(r => wbsLevel(r.wbs) === 2 && !r.is_leaf)
       .map(r => ({ wbs: r.wbs, title: r.title, top: r.wbs.split('.')[0] }));
-    res.json({ statuses: STATUSES, weights: WEIGHTS, leads, topLevel, subtasks });
+    res.json({ statuses: STATUSES, leads, topLevel, subtasks });
   } catch (e) { next(e); }
 });
 
@@ -269,9 +279,7 @@ app.post('/api/tasks', async (req, res, next) => {
     if (pct > 1) pct = pct / 100;
     pct = Math.min(1, Math.max(0, pct));
     const status = clean(b.status) || statusFromPct(pct);
-
-    let weight = b.weight === '' || b.weight == null ? 2 : Number(b.weight);
-    if (!WEIGHT_VALUES.includes(weight)) weight = 2;
+    if (status === 'Complete') pct = 1;
 
     const rows = await query('SELECT * FROM tasks ORDER BY sort ASC');
     const top = rows.find(r => r.wbs === topLevelWbs);
@@ -310,18 +318,18 @@ app.post('/api/tasks', async (req, res, next) => {
       // Create a new parent subtask under the top-level task, then the line item under it
       const parentWbs = `${topLevelWbs}.${nextChildNumber(topLevelWbs)}`;
       const at = endOfBlock(topLevelWbs);
-      inserts.push({ at, row: { phase, wbs: parentWbs, title: newSubTitle, lead, start_date: null, deadline: null, status: null, pct: null, weight: null, notes: 'User-created subtask.' } });
+      inserts.push({ at, row: { phase, wbs: parentWbs, title: newSubTitle, lead, start_date: null, deadline: null, status: null, pct: null, notes: 'User-created subtask.' } });
       newWbs = `${parentWbs}.1`;
-      inserts.push({ at: at + 1, row: { phase, wbs: newWbs, title, lead, start_date: startDate, deadline, status, pct, weight, notes } });
+      inserts.push({ at: at + 1, row: { phase, wbs: newWbs, title, lead, start_date: startDate, deadline, status, pct, notes } });
     } else if (existingWbs) {
       if (!existingWbs.startsWith(topLevelWbs + '.')) {
         return res.status(400).json({ error: 'The selected existing subtask does not belong to that top-level task.' });
       }
       newWbs = `${existingWbs}.${nextChildNumber(existingWbs)}`;
-      inserts.push({ at: endOfBlock(existingWbs), row: { phase, wbs: newWbs, title, lead, start_date: startDate, deadline, status, pct, weight, notes } });
+      inserts.push({ at: endOfBlock(existingWbs), row: { phase, wbs: newWbs, title, lead, start_date: startDate, deadline, status, pct, notes } });
     } else {
       newWbs = `${topLevelWbs}.${nextChildNumber(topLevelWbs)}`;
-      inserts.push({ at: endOfBlock(topLevelWbs), row: { phase, wbs: newWbs, title, lead, start_date: startDate, deadline, status, pct, weight, notes } });
+      inserts.push({ at: endOfBlock(topLevelWbs), row: { phase, wbs: newWbs, title, lead, start_date: startDate, deadline, status, pct, notes } });
     }
 
     // Apply inserts (shift sort values, then insert)
@@ -329,10 +337,10 @@ app.post('/api/tasks', async (req, res, next) => {
       const sortAt = ins.at < rows.length ? rows[ins.at].sort : (rows.length ? rows[rows.length - 1].sort + 1 : 0);
       await query('UPDATE tasks SET sort = sort + 1 WHERE sort >= ?', [sortAt]);
       await query(
-        `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, weight, notes, sort)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, notes, sort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [ins.row.phase, ins.row.wbs, ins.row.title, ins.row.lead, ins.row.start_date,
-         ins.row.deadline, ins.row.status, ins.row.pct, ins.row.weight, ins.row.notes, sortAt]
+         ins.row.deadline, ins.row.status, ins.row.pct, ins.row.notes, sortAt]
       );
       // keep local copy consistent for the second insert
       rows.splice(ins.at, 0, { ...ins.row, sort: sortAt });
@@ -373,11 +381,10 @@ app.patch('/api/tasks/:id', async (req, res, next) => {
       if (!STATUSES.includes(b.status)) return res.status(400).json({ error: 'Invalid status.' });
       fields.status = b.status;
     }
-    if (b.weight !== undefined) {
-      const weight = Number(b.weight);
-      if (!WEIGHT_VALUES.includes(weight)) return res.status(400).json({ error: 'Invalid weight.' });
-      fields.weight = weight;
-    }
+
+    // Complete always means 100%, regardless of what % was submitted alongside it.
+    const effectiveStatus = fields.status !== undefined ? fields.status : existing[0].status;
+    if (effectiveStatus === 'Complete') fields.pct = 1;
 
     const start = fields.start_date ?? existing[0].start_date;
     const end = fields.deadline ?? existing[0].deadline;
@@ -443,10 +450,10 @@ app.get('/api/export.csv', async (req, res, next) => {
       const s = v == null ? '' : String(v);
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
-    const header = 'Phase,WBS,Task / Subtask,Lead,Start Date,Deadline,Status,Weight,% Complete,Notes';
+    const header = 'Phase,WBS,Task / Subtask,Lead,Start Date,Deadline,Status,Weight (days),% Complete,Notes';
     const lines = rows.map(r => [
       r.phase, r.wbs, r.title, r.lead, r.start_date, r.deadline, r.status,
-      r.is_leaf ? (WEIGHT_LABELS[r.weight] || '') : '',
+      r.is_leaf ? r.weight : '',
       r.pct == null ? '' : Math.round(r.pct * 1000) / 10 + '%', r.notes,
     ].map(esc).join(','));
     res.set('Content-Type', 'text/csv');
