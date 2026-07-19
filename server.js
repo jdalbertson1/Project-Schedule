@@ -442,6 +442,68 @@ app.post('/api/tasks/:id/move', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Quick-add a task directly on the schedule (the "+" between rows). The new
+// row's level/WBS is entirely determined by where it's dropped — it becomes
+// a sibling of the target row, inserted immediately before/after it — reusing
+// the exact same renumbering engine as drag-and-drop by treating the fresh
+// row as a "move" of a placeholder into position right after insert.
+// Body: { targetId, position: 'before' | 'after', title, lead?, startDate, deadline, notes? }
+app.post('/api/tasks/insert', async (req, res, next) => {
+  let placeholderId = null;
+  try {
+    const b = req.body || {};
+    const targetId = Number(b.targetId);
+    const position = b.position;
+    const clean = v => (v == null ? '' : String(v).trim());
+    const title = clean(b.title);
+    const lead = clean(b.lead);
+    const notes = clean(b.notes);
+    const startDate = clean(b.startDate);
+    const deadline = clean(b.deadline);
+
+    if (!targetId || !['before', 'after'].includes(position)) {
+      return res.status(400).json({ error: 'Missing or invalid drop position.' });
+    }
+    if (!title) return res.status(400).json({ error: 'Enter a task title.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return res.status(400).json({ error: 'Enter a valid start date.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(deadline)) return res.status(400).json({ error: 'Enter a valid deadline.' });
+    if (deadline < startDate) return res.status(400).json({ error: 'Deadline cannot be earlier than start date.' });
+
+    // Sentinel wbs guaranteed not to prefix-match any real (numeric) wbs, so
+    // computeMove sees this as a fresh leaf with no children of its own.
+    // phase/sort are placeholders too — computeMove recomputes both for
+    // every row it touches, including this one.
+    const inserted = await query(
+      `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, notes, sort)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ${usePg ? 'RETURNING id' : ''}`,
+      ['', '__new__', title, lead, startDate, deadline, 'Not Started', 0, notes, -1]
+    );
+    if (usePg) {
+      placeholderId = inserted[0].id;
+    } else {
+      const latest = await query('SELECT id FROM tasks ORDER BY id DESC LIMIT 1');
+      placeholderId = latest[0].id;
+    }
+
+    const rows = await query('SELECT * FROM tasks');
+    const result = computeMove(rows, placeholderId, targetId, position);
+    if (result.error) {
+      await query('DELETE FROM tasks WHERE id = ?', [placeholderId]);
+      return res.status(400).json({ error: result.error });
+    }
+
+    for (const [id, change] of result.changes) {
+      await query('UPDATE tasks SET wbs = ?, sort = ?, phase = ? WHERE id = ?', [change.wbs, change.sort, change.phase, id]);
+    }
+    await syncFutureMeetingSnapshots();
+    const finalWbs = result.changes.get(placeholderId)?.wbs;
+    res.status(201).json({ ok: true, id: placeholderId, wbs: finalWbs });
+  } catch (e) {
+    if (placeholderId != null) await query('DELETE FROM tasks WHERE id = ?', [placeholderId]).catch(() => {});
+    next(e);
+  }
+});
+
 // CSV export of the computed schedule
 app.get('/api/export.csv', async (req, res, next) => {
   try {

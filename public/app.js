@@ -42,10 +42,6 @@ function pctCell(pct) {
   return `<span class="pct-cell"><span class="pct-bar"><i style="width:${Math.round(pct * 100)}%"></i></span>${fmtPct(pct)}</span>`;
 }
 
-function weightChip(w) {
-  return `<span class="weight-chip">${w}d</span>`;
-}
-
 /* ---------------- tabs ---------------- */
 $$('.tab[data-view]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -142,7 +138,7 @@ async function renderSchedule() {
   });
 
   const tbody = $('#schedule-table tbody');
-  tbody.innerHTML = rows.map(r => {
+  tbody.innerHTML = rows.map((r, idx) => {
     const level = r.wbs.split('.').length;
     const rowCls = [!r.is_leaf ? 'is-parent' : '', level === 1 ? 'is-top' : ''].join(' ');
     const startMo = r.start_date ? r.start_date.slice(0, 7) : null;
@@ -152,15 +148,18 @@ async function renderSchedule() {
       const segCls = on ? `on${mo === startMo ? ' seg-start' : ''}${mo === endMo ? ' seg-end' : ''}` : '';
       return `<td class="gantt-td${mo.endsWith('-01') ? ' year-start' : ''}${mo === thisMonth ? ' is-today' : ''}"><div class="gantt-seg ${segCls}" style="--seg:${phaseColor(r.wbs)}"></div></td>`;
     }).join('');
+    const addAbove = `<button type="button" class="add-row-btn add-row-above" data-target-id="${r.id}" data-position="before" title="Add a task here">+</button>`;
+    const addBelow = idx === rows.length - 1
+      ? `<button type="button" class="add-row-btn add-row-below" data-target-id="${r.id}" data-position="after" title="Add a task here">+</button>`
+      : '';
     return `
     <tr data-id="${r.id}" class="${rowCls}">
-      <td class="mono sticky-col"><span class="drag-handle" draggable="true" title="Drag to reorder or nest under another task">⋮⋮</span><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
+      <td class="mono sticky-col">${addAbove}${addBelow}<span class="drag-handle" draggable="true" title="Drag to reorder or nest under another task">⋮⋮</span><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
       <td class="title-cell sticky-col-2"><span class="indent-${Math.min(level, 4)}">${esc(r.title)}</span></td>
       <td>${esc(r.lead || '')}</td>
       <td class="mono">${fmtDate(r.start_date)}</td>
       <td class="mono">${fmtDate(r.deadline)}</td>
       <td>${statusChip(r.status)}</td>
-      <td>${r.is_leaf ? weightChip(r.weight) : ''}</td>
       <td class="num">${fmtPct(r.pct)}</td>
       <td class="notes-cell">${esc(r.notes || '')}</td>
       <td class="actions-cell">${r.is_leaf ? `<div class="row-actions"><button data-act="edit">Edit</button><button data-act="delete">Delete</button></div>` : ''}</td>
@@ -238,6 +237,54 @@ scheduleBody.addEventListener('dragend', () => {
   dragSourceId = null;
 });
 
+/* ---------------- schedule inline add-task (+ between rows) ---------------- */
+scheduleBody.addEventListener('click', e => {
+  const btn = e.target.closest('.add-row-btn');
+  if (!btn) return;
+  openNewRowEditor(Number(btn.dataset.targetId), btn.dataset.position);
+});
+
+function openNewRowEditor(targetId, position) {
+  $$('tr.new-row-editing', scheduleBody).forEach(el => el.remove());
+  const targetRow = scheduleBody.querySelector(`tr[data-id="${targetId}"]`);
+  if (!targetRow) return;
+  const monthCount = $$('.gantt-th', $('#schedule-head')).length;
+  const tr = document.createElement('tr');
+  tr.className = 'new-row-editing';
+  tr.innerHTML = `
+    <td class="mono sticky-col">—</td>
+    <td class="title-cell sticky-col-2"><input name="title" placeholder="Task title" required></td>
+    <td><input name="lead" placeholder="Lead" list="leads-list"></td>
+    <td><input type="date" name="startDate" required></td>
+    <td><input type="date" name="deadline" required></td>
+    <td>—</td>
+    <td class="num">—</td>
+    <td class="notes-cell"><input name="notes" placeholder="Notes"></td>
+    <td class="actions-cell"><div class="row-actions"><button type="button" class="new-row-save">Save</button><button type="button" class="new-row-cancel">Cancel</button></div></td>
+    ${'<td class="gantt-td"></td>'.repeat(monthCount)}
+  `;
+  if (position === 'before') targetRow.before(tr); else targetRow.after(tr);
+  tr.querySelector('[name="title"]').focus();
+
+  tr.querySelector('.new-row-cancel').addEventListener('click', () => tr.remove());
+  tr.querySelector('.new-row-save').addEventListener('click', async () => {
+    const val = name => tr.querySelector(`[name="${name}"]`)?.value.trim();
+    const title = val('title'), startDate = val('startDate'), deadline = val('deadline');
+    if (!title || !startDate || !deadline) {
+      toast('Title, start date, and deadline are required');
+      return;
+    }
+    try {
+      await api('/api/tasks/insert', {
+        method: 'POST',
+        body: JSON.stringify({ targetId, position, title, lead: val('lead'), startDate, deadline, notes: val('notes') }),
+      });
+      toast('Task added');
+      await refreshAll();
+    } catch (err) { toast(err.message); }
+  });
+}
+
 // inline edit
 document.addEventListener('click', async e => {
   const btn = e.target.closest('button[data-act]');
@@ -268,10 +315,9 @@ document.addEventListener('click', async e => {
     cells[3].innerHTML = `<input type="date" name="startDate" value="${r.start_date || ''}">`;
     cells[4].innerHTML = `<input type="date" name="deadline" value="${r.deadline || ''}">`;
     cells[5].innerHTML = `<select name="status">${statusOpts}</select>`;
-    cells[6].innerHTML = weightChip(r.weight);
-    cells[7].innerHTML = `<input type="number" name="pct" min="0" max="100" step="5" value="${Math.round((r.pct || 0) * 100)}" style="max-width:70px">`;
-    cells[8].innerHTML = `<input name="notes" value="${esc(r.notes || '')}">`;
-    cells[9].innerHTML = `<div class="row-actions"><button data-act="save">Save</button><button data-act="cancel">Cancel</button></div>`;
+    cells[6].innerHTML = `<input type="number" name="pct" min="0" max="100" step="5" value="${Math.round((r.pct || 0) * 100)}" style="max-width:70px">`;
+    cells[7].innerHTML = `<input name="notes" value="${esc(r.notes || '')}">`;
+    cells[8].innerHTML = `<div class="row-actions"><button data-act="save">Save</button><button data-act="cancel">Cancel</button></div>`;
     // Marking a task Complete always means 100% — reflect that immediately in the field.
     tr.querySelector('[name="status"]').addEventListener('change', e => {
       if (e.target.value === 'Complete') tr.querySelector('[name="pct"]').value = 100;
@@ -443,7 +489,7 @@ document.addEventListener('click', () => {
 });
 
 /* ---------------- meetings ---------------- */
-const MEETING_NOTE_COLOR = '#0e8a74'; // teal — visually distinct "written live in the meeting" color
+const MEETING_NOTE_COLOR = '#c0392b'; // red — visually distinct "written live in the meeting" color
 let meetingModeOn = false;
 let currentMeetingId = null;
 
