@@ -140,7 +140,7 @@ async function renderSchedule() {
   const tbody = $('#schedule-table tbody');
   tbody.innerHTML = rows.map((r, idx) => {
     const level = r.wbs.split('.').length;
-    const rowCls = [!r.is_leaf ? 'is-parent' : '', level === 1 ? 'is-top' : ''].join(' ');
+    const rowCls = [!r.is_leaf ? 'is-parent' : '', level === 1 ? 'is-top' : '', `level-${Math.min(level, 4)}`].join(' ');
     const startMo = r.start_date ? r.start_date.slice(0, 7) : null;
     const endMo = r.deadline ? r.deadline.slice(0, 7) : null;
     const gantt = months.map(mo => {
@@ -153,7 +153,7 @@ async function renderSchedule() {
       ? `<button type="button" class="add-row-btn add-row-below" data-target-id="${r.id}" data-position="after" title="Add a task here">+</button>`
       : '';
     return `
-    <tr data-id="${r.id}" class="${rowCls}">
+    <tr data-id="${r.id}" class="${rowCls}" style="--row-accent:${phaseColor(r.wbs)}">
       <td class="mono sticky-col">${addAbove}${addBelow}<span class="drag-handle" draggable="true" title="Drag to reorder or nest under another task">⋮⋮</span><span class="wbs-dot" style="background:${phaseColor(r.wbs)}"></span>${esc(r.wbs)}</td>
       <td class="title-cell sticky-col-2"><span class="indent-${Math.min(level, 4)}">${esc(r.title)}</span></td>
       <td>${esc(r.lead || '')}</td>
@@ -285,6 +285,27 @@ function openNewRowEditor(targetId, position) {
   });
 }
 
+// Complete and 100% always travel together (server enforces this as an
+// absolute invariant) — keep a status <select> and % <input> pair in sync
+// live in both directions, so the UI never fights the user: picking Complete
+// snaps % to 100, and pulling % below 100 releases a stale Complete selection
+// back to an auto-derived status (or `autoValue`, e.g. the Add Task form's
+// "Auto" option, if one is given) instead of the server silently overriding
+// what the user just typed.
+function bindCompletePctSync(statusSel, pctInput, autoValue = null) {
+  statusSel.addEventListener('change', () => {
+    if (statusSel.value === 'Complete') pctInput.value = 100;
+  });
+  pctInput.addEventListener('input', () => {
+    const v = Number(pctInput.value);
+    if (v >= 100) {
+      statusSel.value = 'Complete';
+    } else if (statusSel.value === 'Complete') {
+      statusSel.value = autoValue != null ? autoValue : (v > 0 ? 'In Progress' : 'Not Started');
+    }
+  });
+}
+
 // inline edit
 document.addEventListener('click', async e => {
   const btn = e.target.closest('button[data-act]');
@@ -318,10 +339,10 @@ document.addEventListener('click', async e => {
     cells[6].innerHTML = `<input type="number" name="pct" min="0" max="100" step="5" value="${Math.round((r.pct || 0) * 100)}" style="max-width:70px">`;
     cells[7].innerHTML = `<input name="notes" value="${esc(r.notes || '')}">`;
     cells[8].innerHTML = `<div class="row-actions"><button data-act="save">Save</button><button data-act="cancel">Cancel</button></div>`;
-    // Marking a task Complete always means 100% — reflect that immediately in the field.
-    tr.querySelector('[name="status"]').addEventListener('change', e => {
-      if (e.target.value === 'Complete') tr.querySelector('[name="pct"]').value = 100;
-    });
+    // Complete and 100% always travel together — keep both fields in sync live,
+    // in both directions, so lowering % away from 100 also releases a stale
+    // "Complete" selection instead of the server snapping % back to 100.
+    bindCompletePctSync(tr.querySelector('[name="status"]'), tr.querySelector('[name="pct"]'));
     return;
   }
 
@@ -356,10 +377,7 @@ async function renderLists() {
   updateSubtaskOptions();
 }
 
-// Marking a task Complete always means 100% — reflect that immediately in the field.
-$('#f-status').addEventListener('change', e => {
-  if (e.target.value === 'Complete') $('#f-pct').value = 100;
-});
+bindCompletePctSync($('#f-status'), $('#f-pct'), '');
 
 function updateSubtaskOptions() {
   const top = $('#f-top').value;

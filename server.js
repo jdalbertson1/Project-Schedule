@@ -14,9 +14,42 @@ const { computeMove } = require('./lib/taskMove');
 const app = express();
 app.use(express.json());
 
-// ---- Optional password protection (set APP_PASSWORD in Railway variables) ----
+// ---- CORS for external API clients (set API_KEY below to actually gate access) ----
+// Only relevant to browser-hosted consumers on a different origin — server-to-
+// server calls aren't subject to CORS at all. Defaults to open since the real
+// access boundary is the API key, not the origin (no cookies/credentials are
+// involved, so a permissive origin here doesn't widen what an attacker can do).
+// Set CORS_ORIGIN to a comma-separated allowlist to lock it down further.
+const CORS_ORIGINS = (process.env.CORS_ORIGIN || '*').split(',').map(o => o.trim());
+app.use('/api', (req, res, next) => {
+  const origin = req.get('Origin');
+  if (CORS_ORIGINS.includes('*')) {
+    res.set('Access-Control-Allow-Origin', '*');
+  } else if (origin && CORS_ORIGINS.includes(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+  }
+  res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+function checkApiKey(req) {
+  if (!process.env.API_KEY) return false;
+  const header = req.get('Authorization') || '';
+  const bearer = header.replace(/^Bearer\s+/i, '');
+  const provided = req.get('X-API-Key') || bearer;
+  return !!provided && provided === process.env.API_KEY;
+}
+
+// ---- Optional password protection for the web UI (set APP_PASSWORD in Railway variables) ----
 if (process.env.APP_PASSWORD) {
   app.use((req, res, next) => {
+    // Programmatic clients can use an API key instead of the browser-oriented
+    // Basic Auth prompt — see the API_KEY block below for the case where
+    // there's no APP_PASSWORD at all.
+    if (req.path.startsWith('/api/') && checkApiKey(req)) return next();
     const header = req.headers.authorization || '';
     const token = header.startsWith('Basic ')
       ? Buffer.from(header.slice(6), 'base64').toString()
@@ -25,6 +58,18 @@ if (process.env.APP_PASSWORD) {
     if (pass === process.env.APP_PASSWORD) return next();
     res.set('WWW-Authenticate', 'Basic realm="EZData Schedule"');
     return res.status(401).send('Authentication required');
+  });
+}
+
+// ---- Optional API key protection for programmatic /api/* access ----
+// Independent of APP_PASSWORD — lets you require a key for the API even when
+// the web UI itself is left open. If APP_PASSWORD is also set, the key is
+// already accepted as an alternative in the middleware above; this block only
+// runs when there's no APP_PASSWORD, so /api/* still gets gated on its own.
+if (process.env.API_KEY && !process.env.APP_PASSWORD) {
+  app.use('/api', (req, res, next) => {
+    if (checkApiKey(req)) return next();
+    res.status(401).json({ error: 'Missing or invalid API key.' });
   });
 }
 
@@ -75,7 +120,9 @@ async function computedTasks() {
     if (r.is_leaf) {
       if (r.pct === null) r.pct = 0;
       if (!r.status) r.status = statusFromPct(r.pct);
+      // Complete and 100% always travel together, whichever one was set.
       if (r.status === 'Complete') r.pct = 1;
+      if (r.pct >= 1) r.status = 'Complete';
       continue;
     }
     // Parent: roll up from leaf descendants (same as MIN/MAX/SUMPRODUCT formulas),
@@ -106,13 +153,33 @@ function addDays(iso, days) {
 }
 
 // Leaf tasks due within 14 days of `asOf` (inclusive) that aren't complete yet.
-// Used by both the dashboard ("due next 14 days") and meeting agendas
-// (the "upcoming two weeks" snapshot as of the meeting date).
-function nearTermSnapshot(rows, asOf) {
+// This is the strict "due soon" definition — used for the dashboard's "due
+// next 14 days" count specifically, so that stat stays literally accurate.
+function dueSoonSnapshot(rows, asOf) {
   const horizon = addDays(asOf, 14);
   return rows.filter(r => r.is_leaf)
-    .filter(l => l.deadline && l.deadline >= asOf && l.deadline <= horizon && (l.pct || 0) < 1)
-    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+    .filter(l => l.deadline && l.deadline >= asOf && l.deadline <= horizon && (l.pct || 0) < 1);
+}
+
+// Everything worth reviewing as of `asOf`: due-soon items, PLUS any task
+// that's actively "In Progress" regardless of its deadline — overdue-but-
+// in-progress and far-future-but-in-progress tasks both belong here, since
+// whoever owns them can give an update either way, not just when the
+// deadline happens to be close. Used by both the dashboard ("Near-term
+// actions") and meeting agendas (the "upcoming two weeks" snapshot as of the
+// meeting date).
+function nearTermSnapshot(rows, asOf) {
+  const dueSoon = dueSoonSnapshot(rows, asOf);
+  const inProgress = rows.filter(r => r.is_leaf && r.status === 'In Progress' && (r.pct || 0) < 1);
+  const seen = new Set();
+  const combined = [];
+  for (const l of [...dueSoon, ...inProgress]) {
+    if (seen.has(l.id)) continue;
+    seen.add(l.id);
+    combined.push(l);
+  }
+  const FAR_FUTURE = '9999-12-31';
+  return combined.sort((a, b) => (a.deadline || FAR_FUTURE).localeCompare(b.deadline || FAR_FUTURE));
 }
 
 function escHtml(s) {
@@ -154,7 +221,7 @@ function buildSnapshotTable(rows, meetingDate) {
 function buildAgendaHtml(rows, meetingDate) {
   const table = buildSnapshotTable(rows, meetingDate);
   return `<h2>EZData</h2>`
-    + `<h3>Upcoming two weeks (as of ${escHtml(fmtDateLong(meetingDate))})</h3>${table}`
+    + `<h3>Upcoming two weeks & in-progress items (as of ${escHtml(fmtDateLong(meetingDate))})</h3>${table}`
     + `<h3>Discussion items</h3><ul><li><br></li></ul>`
     + `<h2>NEORide Technology On-Call Projects</h2>`
     + `<h3>Discussion items</h3><ul><li><br></li></ul>`;
@@ -198,7 +265,8 @@ app.get('/api/dashboard', async (req, res, next) => {
     const rows = await computedTasks();
     const leaves = rows.filter(r => r.is_leaf);
     const today = todayISO();
-    const dueSoon = nearTermSnapshot(rows, today);
+    const dueSoonCount = dueSoonSnapshot(rows, today).length;
+    const nearTerm = nearTermSnapshot(rows, today);
 
     const phases = rows.filter(r => !r.wbs.includes('.')).map(p => ({
       wbs: p.wbs, title: p.title, phase: p.phase,
@@ -210,12 +278,12 @@ app.get('/api/dashboard', async (req, res, next) => {
     res.json({
       today,
       overall_pct: overallWeight ? leaves.reduce((s, l) => s + (l.pct || 0) * l.weight, 0) / overallWeight : 0,
-      due_next_14: dueSoon.length,
+      due_next_14: dueSoonCount,
       in_progress: leaves.filter(l => l.status === 'In Progress').length,
       complete: leaves.filter(l => l.status === 'Complete').length,
       total_leaves: leaves.length,
       phases,
-      near_term: dueSoon,
+      near_term: nearTerm,
       overdue: leaves.filter(l => l.deadline && l.deadline < today && (l.pct || 0) < 1)
         .sort((a, b) => a.deadline.localeCompare(b.deadline)),
     });
@@ -278,8 +346,10 @@ app.post('/api/tasks', async (req, res, next) => {
     if (Number.isNaN(pct)) pct = 0;
     if (pct > 1) pct = pct / 100;
     pct = Math.min(1, Math.max(0, pct));
-    const status = clean(b.status) || statusFromPct(pct);
+    let status = clean(b.status) || statusFromPct(pct);
+    // Complete and 100% always travel together, whichever one was set.
     if (status === 'Complete') pct = 1;
+    if (pct >= 1) status = 'Complete';
 
     const rows = await query('SELECT * FROM tasks ORDER BY sort ASC');
     const top = rows.find(r => r.wbs === topLevelWbs);
@@ -382,9 +452,14 @@ app.patch('/api/tasks/:id', async (req, res, next) => {
       fields.status = b.status;
     }
 
-    // Complete always means 100%, regardless of what % was submitted alongside it.
+    // Complete and 100% always travel together, whichever one was set — if
+    // they conflict (both submitted at once with different values), whichever
+    // rule runs last below wins, so 100% always beats a stale non-Complete
+    // status submitted alongside it.
     const effectiveStatus = fields.status !== undefined ? fields.status : existing[0].status;
     if (effectiveStatus === 'Complete') fields.pct = 1;
+    const finalPct = fields.pct !== undefined ? fields.pct : existing[0].pct;
+    if (finalPct >= 1) fields.status = 'Complete';
 
     const start = fields.start_date ?? existing[0].start_date;
     const end = fields.deadline ?? existing[0].deadline;

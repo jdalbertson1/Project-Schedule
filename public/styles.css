@@ -123,9 +123,17 @@ td.num { font-family: var(--font-mono); font-size: 13px; }
 
 /* phase color coding */
 .wbs-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+/* hierarchy depth: heavier weight, more tint, and a thicker left accent the shallower the level */
 tr.is-parent td { font-weight: 700; background: #f7f9fa; }
 tr.is-top td { background: #eff3f6; }
 tr.is-top .title-cell { text-transform: uppercase; letter-spacing: 0.6px; font-size: 13px; }
+tr.is-parent.level-2 td { font-weight: 600; background: #f4f6f8; }
+tr.is-parent.level-3 td { font-weight: 500; background: #f9fafb; }
+tr.is-parent.level-4 td { font-weight: 500; background: transparent; }
+tr.is-parent td.sticky-col { border-left: 1px solid var(--row-accent, var(--ink-soft)); }
+tr.is-parent.level-1 td.sticky-col { border-left-width: 4px; }
+tr.is-parent.level-2 td.sticky-col { border-left-width: 3px; }
+tr.is-parent.level-3 td.sticky-col { border-left-width: 2px; }
 
 .indent-1 { padding-left: 0; }
 .indent-2 { padding-left: 16px; }
@@ -194,6 +202,9 @@ tr.is-parent .gantt-seg.on { height: 6px; opacity: 0.45; }
 .schedule-table td.sticky-col, .schedule-table td.sticky-col-2 { background: var(--panel); }
 tr.is-parent td.sticky-col, tr.is-parent td.sticky-col-2 { background: #f7f9fa; }
 tr.is-top td.sticky-col, tr.is-top td.sticky-col-2 { background: #eff3f6; }
+tr.is-parent.level-2 td.sticky-col, tr.is-parent.level-2 td.sticky-col-2 { background: #f4f6f8; }
+tr.is-parent.level-3 td.sticky-col, tr.is-parent.level-3 td.sticky-col-2 { background: #f9fafb; }
+tr.is-parent.level-4 td.sticky-col, tr.is-parent.level-4 td.sticky-col-2 { background: var(--panel); }
 tr.editing td.sticky-col, tr.editing td.sticky-col-2 { background: #fbfcf3; }
 .schedule-table .sticky-col-2 { box-shadow: 3px 0 4px -2px rgba(27, 39, 51, 0.18); }
 

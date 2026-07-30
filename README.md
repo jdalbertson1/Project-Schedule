@@ -50,6 +50,8 @@ Your full schedule data is included in `seed.json` and loads automatically the f
 
 8. **(Optional) Enable AI fill on the Add Task tab.** Get an API key from [console.anthropic.com](https://console.anthropic.com), add it as a Railway variable named `ANTHROPIC_API_KEY`, then Deploy the pending change. The "Fill with AI" panel appears automatically once it's detected (check `/api/ai/status`). Voice input uses the browser's built-in speech recognition (Chrome/Edge) with a typed-text fallback everywhere else — either way, the AI only fills the form; you still review and submit it yourself.
 
+9. **(Optional) Enable API access for other apps you've built.** See [External API access](#external-api-access) below — add an `API_KEY` Railway variable, then Deploy the pending change.
+
 ### Option B — Railway CLI (no GitHub)
 
 ```bash
@@ -89,6 +91,43 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | Dragging a row on the Schedule tab | `POST /api/tasks/:id/move` (renumbers WBS/sort/phase for the moved subtree and any shifted siblings) |
 | The "+" between rows on the Schedule tab | `POST /api/tasks/insert` (creates the task, then runs it through the same renumbering engine as a move) |
 | — | Meeting agendas/minutes → `GET/POST /api/meetings`, `GET/PATCH/DELETE /api/meetings/:id`, `.../export.docx`, `.../export.pdf`, `.../dropbox` |
+
+## External API access
+
+Every feature in this app is already backed by a plain REST/JSON API under `/api/*` — the web UI is just one consumer of it. Any other application you've built (any language, any host) can call it directly over HTTP.
+
+### Authentication
+
+- **No `API_KEY` set** — `/api/*` is open (or gated by `APP_PASSWORD` Basic Auth, same as the web UI, if that's set).
+- **`API_KEY` set** — send it as either header on any `/api/*` request:
+  ```
+  X-API-Key: your-key-here
+  ```
+  or
+  ```
+  Authorization: Bearer your-key-here
+  ```
+  This works whether or not `APP_PASSWORD` is also set — the key is always accepted as an alternative to the browser's Basic Auth prompt. If `APP_PASSWORD` is set and `API_KEY` is not, the API falls back to requiring Basic Auth (`curl -u ":yourpassword" ...`) same as a browser would.
+
+Generate a strong key yourself, e.g. `openssl rand -hex 32`, and add it as an `API_KEY` Railway variable (remember to Deploy the pending change afterward — the running server won't see it until it restarts).
+
+### CORS
+
+`/api/*` responses include permissive CORS headers by default (`Access-Control-Allow-Origin: *`), so a browser-based app on a different domain can call this API directly with `fetch()`. This is safe to leave open because the API key travels in a custom header, not a cookie — an open origin doesn't hand out any ambient credential the way it would with cookie-based auth. To restrict it to specific origins instead, set `CORS_ORIGIN` to a comma-separated allowlist (e.g. `https://app1.example.com,https://app2.example.com`).
+
+### Example
+
+```bash
+curl https://your-app.up.railway.app/api/schedule \
+  -H "X-API-Key: your-key-here"
+
+curl https://your-app.up.railway.app/api/tasks \
+  -H "X-API-Key: your-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"topLevelWbs": "1", "title": "New task from another app", "startDate": "2026-08-01", "deadline": "2026-08-10"}'
+```
+
+See the endpoint table above for the full surface — every route the web UI itself uses (schedule, tasks, meetings, exports) is available the same way.
 
 ## Notes / known data quirks carried over from the workbook
 
