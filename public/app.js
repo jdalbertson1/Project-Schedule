@@ -43,10 +43,14 @@ function pctCell(pct) {
 }
 
 /* ---------------- tabs ---------------- */
+function activateTab(view) {
+  $$('.tab[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
+}
 $$('.tab[data-view]').forEach(btn => {
   btn.addEventListener('click', () => {
-    $$('.tab[data-view]').forEach(b => b.classList.toggle('active', b === btn));
-    $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + btn.dataset.view));
+    activateTab(btn.dataset.view);
+    if (btn.dataset.view !== 'meetings' && location.pathname !== '/') history.pushState(null, '', '/');
   });
 });
 
@@ -577,7 +581,7 @@ function updateMeetingModeButton() {
 let currentMeetingTitle = '';
 let currentMeetingDate = '';
 
-async function openMeeting(id) {
+async function openMeeting(id, opts = {}) {
   const m = await api(`/api/meetings/${id}`);
   currentMeetingId = m.id;
   currentMeetingTitle = m.title;
@@ -594,13 +598,33 @@ async function openMeeting(id) {
   $('#meetings-list-panel').hidden = true;
   $('#meeting-editor-panel').hidden = false;
   document.execCommand('styleWithCSS', false, true);
+  if (!opts.skipHistory) {
+    const url = `/meetings/${id}`;
+    if (opts.replace) history.replaceState(null, '', url);
+    else history.pushState(null, '', url);
+  }
 }
 
-$('#meeting-back').addEventListener('click', () => {
+function closeMeetingEditor(opts = {}) {
   $('#meeting-editor-panel').hidden = true;
   $('#meetings-list-panel').hidden = false;
   currentMeetingId = null;
-});
+  if (!opts.skipHistory) history.pushState(null, '', '/');
+}
+
+$('#meeting-back').addEventListener('click', () => closeMeetingEditor());
+
+window.addEventListener('popstate', () => routeFromLocation({ skipHistory: true }));
+
+function routeFromLocation(opts = {}) {
+  const m = /^\/meetings\/(\d+)/.exec(location.pathname);
+  if (m) {
+    activateTab('meetings');
+    openMeeting(m[1], opts).catch(() => closeMeetingEditor(opts));
+  } else if (currentMeetingId) {
+    closeMeetingEditor(opts);
+  }
+}
 
 $('#meeting-editor-title').addEventListener('blur', async e => {
   if (!currentMeetingId) return;
@@ -824,9 +848,9 @@ async function saveMeetingNotes() {
 $('#meeting-save').addEventListener('click', async () => {
   try {
     await saveMeetingNotes();
-    $('#meeting-msg').textContent = 'Saved ' + new Date().toLocaleTimeString();
-    $('#meeting-msg').classList.add('ok');
     await renderMeetingsList();
+    toast('Meeting saved');
+    closeMeetingEditor();
   } catch (err) { toast(err.message); }
 });
 
@@ -851,3 +875,4 @@ async function refreshAll() {
 $('#nm-date').value = todayISOClient();
 refreshAll().catch(err => toast(err.message));
 initAiFillPanel().catch(() => {});
+routeFromLocation({ replace: true });

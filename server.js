@@ -740,6 +740,12 @@ app.post('/api/meetings/:id/dropbox', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// SPA fallback — lets a shared link like /meetings/5 be opened directly in a
+// fresh browser tab; the client-side router then opens that specific meeting.
+app.get(/^\/(?!api\/).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Server error. Check the logs.' });
