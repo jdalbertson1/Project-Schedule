@@ -59,6 +59,14 @@ async function init() {
     if (!/already exists|duplicate column/i.test(e.message)) throw e;
   }
 
+  await query(`CREATE TABLE IF NOT EXISTS documents (
+    ${idCol},
+    phase TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+
   await query(`CREATE TABLE IF NOT EXISTS meetings (
     ${idCol},
     title TEXT NOT NULL,

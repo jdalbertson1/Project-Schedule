@@ -55,8 +55,11 @@ $$('.tab[data-view]').forEach(btn => {
 });
 
 /* ---------------- dashboard ---------------- */
+let DASHBOARD_PHASES = [];
+
 async function renderDashboard() {
   const d = await api('/api/dashboard');
+  DASHBOARD_PHASES = d.phases;
 
   $('#overall-pct').textContent = fmtPct(d.overall_pct);
   $('#overall-fill').style.width = Math.round(d.overall_pct * 100) + '%';
@@ -102,6 +105,99 @@ async function renderDashboard() {
       <td class="mono">${fmtDate(t.deadline)}</td>
       <td class="num">${fmtPct(t.pct)}</td>
     </tr>`).join('');
+}
+
+/* ---------------- key documents (dashboard tiles linking to Dropbox files) ---------------- */
+let DROPBOX_CHOOSER_APP_KEY = null;
+
+async function initDropboxChooser() {
+  try {
+    const { appKey } = await api('/api/dropbox/chooser-config');
+    DROPBOX_CHOOSER_APP_KEY = appKey;
+    if (!appKey) { $('#doc-unconfigured-msg').hidden = false; return; }
+    const script = document.createElement('script');
+    script.id = 'dropboxjs';
+    script.src = 'https://www.dropbox.com/static/api/2/dropins.js';
+    script.dataset.appKey = appKey;
+    document.head.appendChild(script);
+  } catch { $('#doc-unconfigured-msg').hidden = false; }
+}
+
+function phaseOptionsHtml(selected) {
+  return DASHBOARD_PHASES.map(p =>
+    `<option value="${esc(p.wbs)}"${p.wbs === selected ? ' selected' : ''}>${esc(p.wbs)} — ${esc(p.title)}</option>`
+  ).join('');
+}
+
+async function renderDocuments() {
+  const docs = await api('/api/documents');
+  const groups = $('#documents-groups');
+  $('#documents-empty').hidden = docs.length > 0;
+  if (!docs.length) { groups.innerHTML = ''; return; }
+
+  groups.innerHTML = DASHBOARD_PHASES.map(p => {
+    const items = docs.filter(d => d.phase === p.wbs);
+    if (!items.length) return '';
+    return `
+    <div class="doc-group">
+      <h3 class="doc-group-title"><span class="wbs-dot" style="background:${phaseColor(p.wbs)}"></span>${esc(p.title)}</h3>
+      <div class="doc-tiles">
+        ${items.map(doc => `
+          <a class="doc-tile" href="${esc(doc.url)}" target="_blank" rel="noopener" title="${esc(doc.title)}" style="--row-accent:${phaseColor(p.wbs)}">
+            <span class="doc-tile-title">${esc(doc.title)}</span>
+            <button type="button" class="doc-tile-remove" data-id="${doc.id}" title="Remove this link" aria-label="Remove this link">×</button>
+          </a>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+$('#documents-groups').addEventListener('click', async e => {
+  const btn = e.target.closest('.doc-tile-remove');
+  if (!btn) return;
+  e.preventDefault();
+  if (!confirm('Remove this document link? The file itself stays in Dropbox — this only removes the tile.')) return;
+  try {
+    await api(`/api/documents/${btn.dataset.id}`, { method: 'DELETE' });
+    await renderDocuments();
+  } catch (err) { toast(err.message); }
+});
+
+$('#doc-add-btn').addEventListener('click', () => {
+  if (!DROPBOX_CHOOSER_APP_KEY || typeof Dropbox === 'undefined') {
+    toast('Dropbox is not connected yet — see the README for setup.');
+    return;
+  }
+  Dropbox.choose({
+    success: files => {
+      const file = files[0];
+      if (file) openDocPhasePrompt(file.name, file.link);
+    },
+    linkType: 'preview',
+    multiselect: false,
+  });
+});
+
+function openDocPhasePrompt(title, url) {
+  const groups = $('#documents-groups');
+  const card = document.createElement('div');
+  card.className = 'doc-pending';
+  card.innerHTML = `
+    <span class="doc-pending-title">${esc(title)}</span>
+    <select class="doc-pending-phase">${phaseOptionsHtml(DASHBOARD_PHASES[0] && DASHBOARD_PHASES[0].wbs)}</select>
+    <button type="button" class="btn btn-primary" data-act="confirm">Add</button>
+    <button type="button" class="btn" data-act="cancel">Cancel</button>`;
+  groups.prepend(card);
+  card.querySelector('[data-act="cancel"]').addEventListener('click', () => card.remove());
+  card.querySelector('[data-act="confirm"]').addEventListener('click', async () => {
+    const phase = card.querySelector('.doc-pending-phase').value;
+    try {
+      await api('/api/documents', { method: 'POST', body: JSON.stringify({ phase, title, url }) });
+      card.remove();
+      toast('Document linked');
+      await renderDocuments();
+    } catch (err) { toast(err.message); }
+  });
 }
 
 /* ---------------- schedule + gantt ---------------- */
@@ -871,8 +967,10 @@ $('#meeting-dropbox').addEventListener('click', async () => {
 /* ---------------- boot ---------------- */
 async function refreshAll() {
   await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList()]);
+  await renderDocuments(); // depends on DASHBOARD_PHASES, set by renderDashboard above
 }
 $('#nm-date').value = todayISOClient();
 refreshAll().catch(err => toast(err.message));
 initAiFillPanel().catch(() => {});
+initDropboxChooser().catch(() => {});
 routeFromLocation({ replace: true });

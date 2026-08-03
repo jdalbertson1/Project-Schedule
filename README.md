@@ -2,7 +2,8 @@
 
 A web replacement for `EZData_Schedule.xlsm`. Everything the workbook did, without macros, plus a few things it never did.
 
-- **Dashboard** — overall completion (weighted — see below), items due in the next 14 days, in-progress / complete counts, phase summary, near-term actions list, plus an overdue list.
+- **Dashboard** — overall completion (weighted — see below), items due in the next 14 days, in-progress / complete counts, phase summary, near-term actions list, a Key documents section, plus an overdue list.
+- **Key documents** — link files already sitting in Dropbox directly on the dashboard, grouped by phase. Click **+ Add document**, pick the file from the Dropbox Chooser popup (your normal Dropbox folder browser — no copy-pasting share links), choose which phase it belongs to, and it appears as a tile immediately with the filename as its title. Requires the Dropbox Chooser to be enabled for your app — see the Dropbox setup step below.
 - **Schedule** — the full WBS table with the 48-month Gantt view, phase color coding, and inline editing of leaf rows. The WBS and Task/Subtask columns stay frozen while you scroll right through the Gantt view. Parent rows roll up automatically (min start, max deadline, **weighted** average % of leaf tasks). Marking a task Complete always sets it to 100%. Drag any row by its ⋮⋮ handle to reorder it or drop it onto another row to nest it underneath — hover the top/bottom edge of a row to drop as a sibling before/after it, or the middle to drop inside it as a child. Hovering the seam between two rows also reveals a **+** button to add a brand-new task right there — title, start date, and deadline are required (lead/notes optional); its WBS, level, and phase are derived entirely from where you drop it, exactly like a drag move. WBS numbers, sort order, and rollup percentages all recompute automatically; a formerly-leaf task you add something under becomes a parent row on the spot.
 - **Weight** — each leaf task's weight is its duration in days (deadline − start date, inclusive), computed automatically — a 1-day task counts for 1 toward its parent's rollup, a 1000-day task counts for 1000, so long-running or recurring line items aren't diluted by lots of small finished tasks. Not editable directly; change the dates to change the weight.
 - **Marking a task Complete always sets it to 100%**, no matter what the % field said before — enforced on the server so this holds however the change was made (inline edit, Add Task form, or AI fill).
@@ -47,6 +48,7 @@ Your full schedule data is included in `seed.json` and loads automatically the f
    - Add Railway variables: `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`, and `DROPBOX_FOLDER` (the exact path of your destination folder, e.g. `/Team Meetings` — found from the folder's breadcrumb path in Dropbox, not its share link).
    - Any time you add/change Railway variables, you must **Deploy** the pending changes (or Redeploy) — the running server won't see them until it restarts.
    - Check `/api/dropbox/status` on your deployed app any time to see whether it's connected and which variables (if any) are missing.
+   - **To also enable the dashboard's "+ Add document" Dropbox Chooser**, open the same app at [dropbox.com/developers/apps](https://www.dropbox.com/developers/apps) → **Permissions/Chooser** (or "Branded Apps" section) and turn on **Chooser/Saver/Embedder**, then add your deployed app's domain (e.g. `your-app.up.railway.app`) to its allowed domains list. The Chooser only ever uses the public `DROPBOX_APP_KEY` you already added above (never the secret or refresh token) — no extra variable needed. Without this step, the dashboard shows "Connect Dropbox" and the Add document button is disabled.
 
 8. **(Optional) Enable AI fill on the Add Task tab.** Get an API key from [console.anthropic.com](https://console.anthropic.com), add it as a Railway variable named `ANTHROPIC_API_KEY`, then Deploy the pending change. The "Fill with AI" panel appears automatically once it's detected (check `/api/ai/status`). Voice input uses the browser's built-in speech recognition (Chrome/Edge) with a typed-text fallback everywhere else — either way, the AI only fills the form; you still review and submit it yourself.
 
@@ -91,6 +93,7 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | Dragging a row on the Schedule tab | `POST /api/tasks/:id/move` (renumbers WBS/sort/phase for the moved subtree and any shifted siblings) |
 | The "+" between rows on the Schedule tab | `POST /api/tasks/insert` (creates the task, then runs it through the same renumbering engine as a move) |
 | — | Meeting agendas/minutes → `GET/POST /api/meetings`, `GET/PATCH/DELETE /api/meetings/:id`, `.../export.docx`, `.../export.pdf`, `.../dropbox` |
+| — | Key documents tiles → `GET/POST /api/documents`, `DELETE /api/documents/:id` |
 
 ## External API access
 

@@ -729,6 +729,48 @@ app.get('/api/dropbox/status', (req, res) => {
   res.json({ configured: missing.length === 0, missing });
 });
 
+// The Dropbox Chooser widget only ever needs the public app key (never the
+// secret or refresh token) — safe to hand to the browser so it can pop the
+// picker and hand back an already-shareable link for the file the user picks.
+app.get('/api/dropbox/chooser-config', (req, res) => {
+  res.json({ appKey: process.env.DROPBOX_APP_KEY || null });
+});
+
+// ---- Key documents (dashboard tiles linking to files already in Dropbox) ----
+app.get('/api/documents', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM documents ORDER BY phase ASC, title ASC');
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/documents', async (req, res, next) => {
+  try {
+    const { phase, title, url } = req.body || {};
+    if (!phase || !title || !url) {
+      res.status(400).json({ error: 'phase, title, and url are all required.' });
+      return;
+    }
+    const now = new Date().toISOString();
+    const inserted = await query(
+      usePg
+        ? 'INSERT INTO documents (phase, title, url, created_at) VALUES (?, ?, ?, ?) RETURNING *'
+        : 'INSERT INTO documents (phase, title, url, created_at) VALUES (?, ?, ?, ?)',
+      [String(phase), String(title), String(url), now]
+    );
+    if (usePg) { res.status(201).json(inserted[0]); return; }
+    const row = await query('SELECT * FROM documents WHERE id = last_insert_rowid()');
+    res.status(201).json(row[0]);
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/documents/:id', async (req, res, next) => {
+  try {
+    await query('DELETE FROM documents WHERE id = ?', [Number(req.params.id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 app.post('/api/meetings/:id/dropbox', async (req, res, next) => {
   try {
     const meeting = await loadMeetingOr404(req, res);

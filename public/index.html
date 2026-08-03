@@ -15,7 +15,6 @@
     <span class="brand-mark" aria-hidden="true"></span>
     <div>
       <h1>NEORide EZData</h1>
-      <p class="brand-sub">Program schedule</p>
     </div>
   </div>
   <div class="overall">
@@ -57,6 +56,16 @@
         <tbody></tbody>
       </table>
       <p class="empty-msg" id="nearterm-empty" hidden>Nothing due soon and nothing currently in progress.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Key documents <span class="h-sub">— linked from Dropbox, grouped by phase</span></h2>
+        <button type="button" class="btn btn-primary" id="doc-add-btn">+ Add document</button>
+      </div>
+      <p class="hint" id="doc-unconfigured-msg" hidden>Connect Dropbox (see README) to enable adding document links.</p>
+      <div id="documents-groups"></div>
+      <p class="empty-msg" id="documents-empty" hidden>No documents linked yet.</p>
     </div>
 
     <div class="panel" id="overdue-panel" hidden>
