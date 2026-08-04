@@ -836,9 +836,27 @@ $('#meeting-doc').addEventListener('keydown', e => {
   if (changed) placeCaretInNode(li);
 });
 
+// Elements created via the toolbar (+Header, +Agenda item) are fresh DOM
+// nodes with no connection to the browser's "current typing style" — setting
+// color directly on the container makes any text typed inside inherit it
+// through normal CSS cascade, no execCommand needed.
+function applyMeetingModeColor(el) {
+  if (meetingModeOn) el.style.color = MEETING_NOTE_COLOR;
+}
+
 $('#meeting-mode-toggle').addEventListener('click', () => {
   meetingModeOn = !meetingModeOn;
   updateMeetingModeButton();
+  const doc = $('#meeting-doc');
+  doc.focus();
+  if (!savedRange) {
+    // Toggled before ever clicking into the notes area — default the caret to
+    // the end of the document so typing works right away instead of no-op'ing.
+    const range = document.createRange();
+    range.selectNodeContents(doc);
+    range.collapse(false);
+    savedRange = range.cloneRange();
+  }
   restoreSelection();
   document.execCommand('foreColor', false, meetingModeOn ? MEETING_NOTE_COLOR : '#1b2733');
 });
@@ -851,9 +869,35 @@ $('#fmt-italic').addEventListener('click', () => {
   restoreSelection();
   document.execCommand('italic');
 });
+
+// Applied directly to the saved Range's own DOM nodes rather than through
+// execCommand on the live window selection — the native color picker can
+// steal focus for an OS-level panel, which is unreliable to race against
+// when re-establishing a live selection at exactly the right moment. A
+// Range's boundary points stay valid regardless of what has focus, so this
+// works whether or not the doc/selection is still "live" when it fires.
+function applyColorToRange(range, color) {
+  if (!range || range.collapsed) return false;
+  const span = document.createElement('span');
+  span.style.color = color;
+  try {
+    range.surroundContents(span);
+  } catch {
+    // Range crosses element boundaries (e.g. spans two <li>s) — surroundContents
+    // requires a range that doesn't partially select a non-text node, so fall
+    // back to extracting the whole fragment and re-inserting it wrapped.
+    const frag = range.extractContents();
+    span.appendChild(frag);
+    range.insertNode(span);
+  }
+  return true;
+}
 $('#fmt-color').addEventListener('input', () => {
-  restoreSelection();
-  document.execCommand('foreColor', false, $('#fmt-color').value);
+  if (applyColorToRange(savedRange, $('#fmt-color').value)) {
+    $('#meeting-doc').focus();
+  } else {
+    toast('Highlight some text first, then pick a color.');
+  }
 });
 
 $('#meeting-add-header').addEventListener('click', () => {
@@ -861,6 +905,7 @@ $('#meeting-add-header').addEventListener('click', () => {
   restoreSelection();
   const h = document.createElement('h2');
   h.textContent = 'New heading';
+  applyMeetingModeColor(h);
   insertBlockAfterCursor(doc, h);
   const range = document.createRange();
   range.selectNodeContents(h);
@@ -930,6 +975,7 @@ $('#meeting-add-item').addEventListener('click', () => {
     li.innerHTML = '<br>';
     target.appendChild(li);
   }
+  applyMeetingModeColor(li);
   placeCaretInNode(li);
 });
 
