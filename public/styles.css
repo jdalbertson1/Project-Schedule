@@ -83,6 +83,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 60px; }
 .h-sub { font-weight: 500; color: var(--ink-faint); font-size: 13.5px; }
 .hint { margin: 0 0 14px; color: var(--ink-soft); font-size: 13.5px; }
 .panel-head { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: baseline; }
+.panel-row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+.panel-row > .panel { flex: 1 1 0; min-width: 320px; margin-bottom: 0; }
 
 /* ---------- stats ---------- */
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; }
@@ -95,7 +97,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 60px; }
 .stat.alert .n { color: var(--danger); }
 
 /* ---------- budget gauge ---------- */
-.budget-gauge { position: relative; max-width: 420px; margin: 4px auto 0; }
+.budget-gauge { position: relative; max-width: 357px; margin: 4px auto 0; }
 .gauge-svg { display: block; width: 100%; height: auto; }
 .gauge-track { fill: none; stroke: var(--line-soft); stroke-width: 22; stroke-linecap: round; }
 .gauge-fill { fill: none; stroke: var(--ph-1); stroke-width: 22; stroke-linecap: round; transition: stroke-dasharray .6s ease; }

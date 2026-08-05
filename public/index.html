@@ -41,29 +41,6 @@
   <section id="view-dashboard" class="view active">
     <div class="stat-row" id="stats"></div>
 
-    <div class="panel" id="budget-panel">
-      <h2>Project budget <span class="h-sub">— invoiced to date vs. total budget, from BigTime</span></h2>
-      <div class="budget-gauge" id="budget-gauge" hidden>
-        <svg class="gauge-svg" viewBox="0 0 320 190">
-          <path class="gauge-track" d="M 30 170 A 130 130 0 0 1 290 170" pathLength="100"></path>
-          <path class="gauge-fill" id="gauge-fill-path" d="M 30 170 A 130 130 0 0 1 290 170" pathLength="100" stroke-dasharray="0 100"></path>
-        </svg>
-        <div class="gauge-pct" id="gauge-pct"></div>
-        <div class="gauge-labels">
-          <div class="gauge-label">
-            <strong id="gauge-spent"></strong>
-            <span>Budget Spent</span>
-          </div>
-          <div class="gauge-label gauge-label-right">
-            <strong id="gauge-total"></strong>
-            <span>Budget Total</span>
-          </div>
-        </div>
-      </div>
-      <p class="empty-msg" id="budget-unconfigured-msg" hidden>Connect BigTime (see README) to show the budget gauge.</p>
-      <p class="empty-msg" id="budget-error-msg" hidden></p>
-    </div>
-
     <div class="panel">
       <h2>Phases</h2>
       <table class="data-table" id="phase-table">
@@ -81,14 +58,39 @@
       <p class="empty-msg" id="nearterm-empty" hidden>Nothing due soon, in progress, or past due.</p>
     </div>
 
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Key documents <span class="h-sub">— linked from Dropbox, grouped by phase</span></h2>
-        <button type="button" class="btn btn-primary" id="doc-add-btn">+ Add document</button>
+    <div class="panel-row">
+      <div class="panel" id="budget-panel">
+        <h2>Project budget <span class="h-sub">— invoiced to date vs. total budget</span></h2>
+        <div class="budget-gauge" id="budget-gauge" hidden>
+          <svg class="gauge-svg" viewBox="0 0 320 190">
+            <path class="gauge-track" d="M 30 170 A 130 130 0 0 1 290 170" pathLength="100"></path>
+            <path class="gauge-fill" id="gauge-fill-path" d="M 30 170 A 130 130 0 0 1 290 170" pathLength="100" stroke-dasharray="0 100"></path>
+          </svg>
+          <div class="gauge-pct" id="gauge-pct"></div>
+          <div class="gauge-labels">
+            <div class="gauge-label">
+              <strong id="gauge-spent"></strong>
+              <span>Budget Spent</span>
+            </div>
+            <div class="gauge-label gauge-label-right">
+              <strong id="gauge-total"></strong>
+              <span>Budget Total</span>
+            </div>
+          </div>
+        </div>
+        <p class="empty-msg" id="budget-unconfigured-msg" hidden>Connect BigTime (see README) to show the budget gauge.</p>
+        <p class="empty-msg" id="budget-error-msg" hidden></p>
       </div>
-      <p class="hint" id="doc-unconfigured-msg" hidden>Connect Dropbox (see README) to enable adding document links.</p>
-      <div id="documents-groups"></div>
-      <p class="empty-msg" id="documents-empty" hidden>No documents linked yet.</p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Key documents <span class="h-sub">— linked from Dropbox, grouped by phase</span></h2>
+          <button type="button" class="btn btn-primary" id="doc-add-btn">+ Add document</button>
+        </div>
+        <p class="hint" id="doc-unconfigured-msg" hidden>Connect Dropbox (see README) to enable adding document links.</p>
+        <div id="documents-groups"></div>
+        <p class="empty-msg" id="documents-empty" hidden>No documents linked yet.</p>
+      </div>
     </div>
 
   </section>
