@@ -182,6 +182,20 @@ function nearTermSnapshot(rows, asOf) {
   return combined.sort((a, b) => (a.deadline || FAR_FUTURE).localeCompare(b.deadline || FAR_FUTURE));
 }
 
+// Dashboard-only: near-term items (due soon + in progress) PLUS anything
+// overdue and incomplete, so nothing disappears now that there's no separate
+// "Overdue" table — the client marks these rows with a red deadline instead.
+// Meeting agendas intentionally keep using nearTermSnapshot() alone (the
+// "upcoming two weeks & in-progress" table's own defined scope).
+function dashboardActionItems(rows, asOf) {
+  const base = nearTermSnapshot(rows, asOf);
+  const overdue = rows.filter(r => r.is_leaf && r.deadline && r.deadline < asOf && (r.pct || 0) < 1);
+  const seen = new Set(base.map(l => l.id));
+  const combined = [...base, ...overdue.filter(l => !seen.has(l.id))];
+  const FAR_FUTURE = '9999-12-31';
+  return combined.sort((a, b) => (a.deadline || FAR_FUTURE).localeCompare(b.deadline || FAR_FUTURE));
+}
+
 function escHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -266,7 +280,7 @@ app.get('/api/dashboard', async (req, res, next) => {
     const leaves = rows.filter(r => r.is_leaf);
     const today = todayISO();
     const dueSoonCount = dueSoonSnapshot(rows, today).length;
-    const nearTerm = nearTermSnapshot(rows, today);
+    const nearTerm = dashboardActionItems(rows, today);
 
     const phases = rows.filter(r => !r.wbs.includes('.')).map(p => ({
       wbs: p.wbs, title: p.title, phase: p.phase,

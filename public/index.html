@@ -50,12 +50,12 @@
     </div>
 
     <div class="panel">
-      <h2>Near-term actions <span class="h-sub">— due in the next 14 days, plus anything currently In Progress</span></h2>
+      <h2>Near-term actions <span class="h-sub">— due in the next 14 days, anything currently In Progress, or past due (shown in red)</span></h2>
       <table class="data-table" id="nearterm-table">
-        <thead><tr><th class="mono">WBS</th><th>Task / Subtask</th><th>Lead</th><th>Start</th><th>Deadline</th><th>Status</th><th class="num">%</th><th>Notes</th></tr></thead>
+        <thead><tr><th class="mono">WBS</th><th>Task / Subtask</th><th>Lead</th><th>Start</th><th>Deadline</th><th>Status</th><th class="num">%</th><th>Notes</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="empty-msg" id="nearterm-empty" hidden>Nothing due soon and nothing currently in progress.</p>
+      <p class="empty-msg" id="nearterm-empty" hidden>Nothing due soon, in progress, or past due.</p>
     </div>
 
     <div class="panel">
@@ -68,13 +68,6 @@
       <p class="empty-msg" id="documents-empty" hidden>No documents linked yet.</p>
     </div>
 
-    <div class="panel" id="overdue-panel" hidden>
-      <h2>Overdue <span class="h-sub">— past deadline and not complete</span></h2>
-      <table class="data-table" id="overdue-table">
-        <thead><tr><th class="mono">WBS</th><th>Task / Subtask</th><th>Lead</th><th>Deadline</th><th class="num">%</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
   </section>
 
   <!-- SCHEDULE -->

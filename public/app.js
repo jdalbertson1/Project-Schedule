@@ -82,29 +82,23 @@ async function renderDashboard() {
     </tr>`).join('');
 
   const nt = $('#nearterm-table tbody');
-  nt.innerHTML = d.near_term.map(t => `
-    <tr>
+  nt.innerHTML = d.near_term.map(t => {
+    const isOverdue = t.deadline && t.deadline < d.today && t.status !== 'Complete';
+    return `
+    <tr data-id="${t.id}">
       <td class="mono"><span class="wbs-dot" style="background:${phaseColor(t.wbs)}"></span>${esc(t.wbs)}</td>
       <td>${esc(t.title)}</td>
       <td>${esc(t.lead || '')}</td>
       <td class="mono">${fmtDate(t.start_date)}</td>
-      <td class="mono">${fmtDate(t.deadline)}</td>
+      <td class="mono${isOverdue ? ' deadline-overdue' : ''}">${fmtDate(t.deadline)}</td>
       <td>${statusChip(t.status)}</td>
       <td class="num">${fmtPct(t.pct)}</td>
       <td>${esc(t.notes || '')}</td>
-    </tr>`).join('');
+      <td class="actions-cell"><div class="row-actions"><button data-act="edit">Edit</button><button data-act="delete">Delete</button></div></td>
+    </tr>`;
+  }).join('');
   $('#nearterm-empty').hidden = d.near_term.length > 0;
   $('#nearterm-table').hidden = d.near_term.length === 0;
-
-  $('#overdue-panel').hidden = d.overdue.length === 0;
-  $('#overdue-table tbody').innerHTML = d.overdue.map(t => `
-    <tr>
-      <td class="mono">${esc(t.wbs)}</td>
-      <td>${esc(t.title)}</td>
-      <td>${esc(t.lead || '')}</td>
-      <td class="mono">${fmtDate(t.deadline)}</td>
-      <td class="num">${fmtPct(t.pct)}</td>
-    </tr>`).join('');
 }
 
 /* ---------------- key documents (dashboard tiles linking to Dropbox files) ---------------- */
@@ -446,7 +440,11 @@ document.addEventListener('click', async e => {
     return;
   }
 
-  if (btn.dataset.act === 'cancel') { renderSchedule(); return; }
+  if (btn.dataset.act === 'cancel') {
+    if (tr.closest('#nearterm-table')) { renderDashboard(); return; }
+    renderSchedule();
+    return;
+  }
 
   if (btn.dataset.act === 'save') {
     const val = name => tr.querySelector(`[name="${name}"]`)?.value;

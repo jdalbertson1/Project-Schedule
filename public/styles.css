@@ -107,6 +107,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 60px; }
 .num { text-align: right; }
 td.num { font-family: var(--font-mono); font-size: 13px; }
 .empty-msg { color: var(--ink-faint); font-size: 14px; margin: 8px 0 0; }
+.deadline-overdue { color: var(--danger); font-weight: 700; }
 
 /* ---------- key documents (dashboard tiles linking to Dropbox files) ---------- */
 .doc-group { margin-top: 16px; }
