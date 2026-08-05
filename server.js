@@ -756,12 +756,6 @@ app.get('/api/bigtime/status', (req, res) => {
 // field names for project id / invoiced amount (unconfirmed from BigTime's
 // docs alone) can be read directly and the real /api/bigtime/budget endpoint
 // finalized against them. Remove once that's done.
-app.get('/api/bigtime/debug-auth', async (req, res) => {
-  try {
-    res.json({ results: await bigtime.tryAuthStrategies() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.get('/api/bigtime/debug', async (req, res, next) => {
   try {
     const project = await bigtime.findProjectByName(BIGTIME_PROJECT_NAME);
