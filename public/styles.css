@@ -94,6 +94,21 @@ main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 60px; }
 .stat .l { color: var(--ink-soft); font-size: 13px; margin-top: 2px; }
 .stat.alert .n { color: var(--danger); }
 
+/* ---------- budget gauge ---------- */
+.budget-gauge { position: relative; max-width: 420px; margin: 4px auto 0; }
+.gauge-svg { display: block; width: 100%; height: auto; }
+.gauge-track { fill: none; stroke: var(--line-soft); stroke-width: 22; stroke-linecap: round; }
+.gauge-fill { fill: none; stroke: var(--ph-1); stroke-width: 22; stroke-linecap: round; transition: stroke-dasharray .6s ease; }
+.gauge-pct {
+  position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%);
+  font: 700 40px var(--font-mono); color: var(--ink);
+}
+.gauge-labels { display: flex; justify-content: space-between; margin-top: -8px; padding: 0 4px; }
+.gauge-label { display: flex; flex-direction: column; align-items: flex-start; }
+.gauge-label-right { align-items: flex-end; }
+.gauge-label strong { font: 700 16px var(--font-mono); color: var(--ink); }
+.gauge-label span { font-size: 12.5px; color: var(--ink-soft); font-weight: 600; margin-top: 2px; }
+
 /* ---------- tables ---------- */
 .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .data-table th {

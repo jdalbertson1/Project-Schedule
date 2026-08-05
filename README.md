@@ -2,7 +2,8 @@
 
 A web replacement for `EZData_Schedule.xlsm`. Everything the workbook did, without macros, plus a few things it never did.
 
-- **Dashboard** — overall completion (weighted — see below), items due in the next 14 days, in-progress / complete counts, phase summary, and a Key documents section. The near-term actions list also folds in anything past due and not complete — no separate overdue table; those rows just show their deadline in red text instead. Every row is editable right there with the same Edit/Delete buttons as the Schedule tab — title, dates, lead, status, % complete, notes — and a save updates the Schedule tab, the dashboard, and any future-dated meeting agenda's snapshot table all at once, since it's the same underlying task record.
+- **Dashboard** — overall completion (weighted — see below), items due in the next 14 days, in-progress / complete counts, phase summary, a project budget gauge, and a Key documents section. The near-term actions list also folds in anything past due and not complete — no separate overdue table; those rows just show their deadline in red text instead. Every row is editable right there with the same Edit/Delete buttons as the Schedule tab — title, dates, lead, status, % complete, notes — and a save updates the Schedule tab, the dashboard, and any future-dated meeting agenda's snapshot table all at once, since it's the same underlying task record.
+- **Project budget gauge** — an arc gauge comparing invoiced-to-date to total budget, pulled from BigTime (summed from every task under the project — BigTime tracks budget at the task level, not as a single project-level number). Refreshes at most twice a month (the 8th and 25th), not on every page load, since this data doesn't move daily. Requires `BIGTIME_API_KEY` and `BIGTIME_FIRM_ID` — see the BigTime setup step below.
 - **Key documents** — link files already sitting in Dropbox directly on the dashboard, grouped by phase. Click **+ Add document**, pick the file from the Dropbox Chooser popup (your normal Dropbox folder browser — no copy-pasting share links), choose which phase it belongs to, and it appears as a tile immediately with the filename as its title. Requires the Dropbox Chooser to be enabled for your app — see the Dropbox setup step below.
 - **Schedule** — the full WBS table with the 48-month Gantt view, phase color coding, and inline editing of leaf rows. The WBS and Task/Subtask columns stay frozen while you scroll right through the Gantt view. Parent rows roll up automatically (min start, max deadline, **weighted** average % of leaf tasks). Marking a task Complete always sets it to 100%. Drag any row by its ⋮⋮ handle to reorder it or drop it onto another row to nest it underneath — hover the top/bottom edge of a row to drop as a sibling before/after it, or the middle to drop inside it as a child. Hovering the seam between two rows also reveals a **+** button to add a brand-new task right there — title, start date, and deadline are required (lead/notes optional); its WBS, level, and phase are derived entirely from where you drop it, exactly like a drag move. WBS numbers, sort order, and rollup percentages all recompute automatically; a formerly-leaf task you add something under becomes a parent row on the spot.
 - **Weight** — each leaf task's weight is its duration in days (deadline − start date, inclusive), computed automatically — a 1-day task counts for 1 toward its parent's rollup, a 1000-day task counts for 1000, so long-running or recurring line items aren't diluted by lots of small finished tasks. Not editable directly; change the dates to change the weight.
@@ -54,6 +55,13 @@ Your full schedule data is included in `seed.json` and loads automatically the f
 
 9. **(Optional) Enable API access for other apps you've built.** See [External API access](#external-api-access) below — add an `API_KEY` Railway variable, then Deploy the pending change.
 
+10. **(Optional) Enable the project budget gauge.** Requires a BigTime firm-level API key:
+    - In BigTime, generate a firm-level API key (Firm Settings → API Access, or wherever your BigTime admin set up `BIGTIME_API_KEY` from). Find your Firm ID alongside it, or log in at [iq.bigtime.net/BigtimeData/api/v2/Help/Session](https://iq.bigtime.net/BigtimeData/api/v2/Help/Session) (click **LOGIN**) — the session response includes a `firm` field.
+    - Add Railway variables: `BIGTIME_API_KEY` and `BIGTIME_FIRM_ID`.
+    - Optionally set `BIGTIME_PROJECT_NAME` if the project's name in BigTime ever changes — it defaults to `NEORide EZData (ATTAIN Grant Project)`.
+    - Deploy the pending changes. Check `/api/bigtime/status` any time to see whether it's connected.
+    - Budget total and invoiced-to-date are both summed from BigTime's per-task budget data (`EstTotal` and `InvoicedToDate` across every task under the project) — verified against real figures ($798,000 budget / $11,175 invoiced) before shipping.
+
 ### Option B — Railway CLI (no GitHub)
 
 ```bash
@@ -94,6 +102,7 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | The "+" between rows on the Schedule tab | `POST /api/tasks/insert` (creates the task, then runs it through the same renumbering engine as a move) |
 | — | Meeting agendas/minutes → `GET/POST /api/meetings`, `GET/PATCH/DELETE /api/meetings/:id`, `.../export.docx`, `.../export.pdf`, `.../dropbox` |
 | — | Key documents tiles → `GET/POST /api/documents`, `DELETE /api/documents/:id` |
+| — | Project budget gauge → `GET /api/bigtime/status`, `GET /api/bigtime/budget` |
 
 ## External API access
 

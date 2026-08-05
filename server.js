@@ -752,31 +752,31 @@ app.get('/api/bigtime/status', (req, res) => {
   res.json({ configured: missing.length === 0, missing, projectName: BIGTIME_PROJECT_NAME });
 });
 
-// Temporary diagnostic route — returns BigTime's raw responses so the exact
-// field names for project id / invoiced amount (unconfirmed from BigTime's
-// docs alone) can be read directly and the real /api/bigtime/budget endpoint
-// finalized against them. Remove once that's done.
-app.get('/api/bigtime/debug', async (req, res, next) => {
+// BigTime data only needs to move twice a month (the 8th and 25th), not on
+// every dashboard load — this finds the most recent one of those two
+// checkpoint dates on or before `todayIso`.
+function lastBudgetCheckpoint(todayIso) {
+  const d = new Date(todayIso + 'T00:00:00Z');
+  const day = d.getUTCDate();
+  if (day >= 25) { d.setUTCDate(25); return d.toISOString().slice(0, 10); }
+  if (day >= 8) { d.setUTCDate(8); return d.toISOString().slice(0, 10); }
+  d.setUTCDate(0); // last day of the previous month
+  d.setUTCDate(25);
+  return d.toISOString().slice(0, 10);
+}
+
+let budgetCache = null; // { ...summary, fetchedOn: 'YYYY-MM-DD' }
+
+app.get('/api/bigtime/budget', async (req, res, next) => {
   try {
-    const project = await bigtime.findProjectByName(BIGTIME_PROJECT_NAME);
-    if (!project) {
-      const all = await bigtime.bigtimeGet('/project');
-      res.status(404).json({
-        error: `No BigTime project matched "${BIGTIME_PROJECT_NAME}"`,
-        allProjectNames: all.map(bigtime.projectDisplayName),
-        sampleProject: all[0] || null,
-      });
-      return;
+    const today = todayISO();
+    const dueSince = lastBudgetCheckpoint(today);
+    if (!budgetCache || budgetCache.fetchedOn < dueSince) {
+      const summary = await bigtime.getProjectBudgetSummary(BIGTIME_PROJECT_NAME);
+      budgetCache = { ...summary, fetchedOn: today };
     }
-    let budgetStatus = null;
-    let budgetStatusError = null;
-    try {
-      budgetStatus = await bigtime.getTaskBudgetStatus(project);
-    } catch (e) {
-      budgetStatusError = e.message;
-    }
-    res.json({ project, budgetStatus, budgetStatusError });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(budgetCache);
+  } catch (e) { next(e); }
 });
 
 // The Dropbox Chooser widget only ever needs the public app key (never the

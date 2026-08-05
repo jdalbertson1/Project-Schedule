@@ -15,6 +15,7 @@ const fmtDate = iso => {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 };
 const fmtPct = p => p == null ? '—' : Math.round(p * 100) + '%';
+const fmtMoney = n => n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 async function api(path, opts = {}) {
@@ -99,6 +100,31 @@ async function renderDashboard() {
   }).join('');
   $('#nearterm-empty').hidden = d.near_term.length > 0;
   $('#nearterm-table').hidden = d.near_term.length === 0;
+}
+
+/* ---------------- project budget gauge (BigTime) ---------------- */
+async function renderBudgetGauge() {
+  const gauge = $('#budget-gauge');
+  const unconfiguredMsg = $('#budget-unconfigured-msg');
+  const errorMsg = $('#budget-error-msg');
+  gauge.hidden = true;
+  unconfiguredMsg.hidden = true;
+  errorMsg.hidden = true;
+
+  try {
+    const status = await api('/api/bigtime/status');
+    if (!status.configured) { unconfiguredMsg.hidden = false; return; }
+    const b = await api('/api/bigtime/budget');
+    const pct = Math.min(1, Math.max(0, b.pctSpent || 0));
+    $('#gauge-fill-path').setAttribute('stroke-dasharray', `${(pct * 100).toFixed(2)} 100`);
+    $('#gauge-pct').textContent = fmtPct(pct);
+    $('#gauge-spent').textContent = fmtMoney(b.invoicedToDate);
+    $('#gauge-total').textContent = fmtMoney(b.budgetTotal);
+    gauge.hidden = false;
+  } catch (err) {
+    errorMsg.textContent = `Couldn't load BigTime budget data: ${err.message}`;
+    errorMsg.hidden = false;
+  }
 }
 
 /* ---------------- key documents (dashboard tiles linking to Dropbox files) ---------------- */
@@ -1010,7 +1036,7 @@ $('#meeting-dropbox').addEventListener('click', async () => {
 
 /* ---------------- boot ---------------- */
 async function refreshAll() {
-  await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList()]);
+  await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList(), renderBudgetGauge()]);
   await renderDocuments(); // depends on DASHBOARD_PHASES, set by renderDashboard above
 }
 $('#nm-date').value = todayISOClient();
