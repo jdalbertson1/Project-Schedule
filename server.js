@@ -8,6 +8,7 @@ const { buildScheduleWorkbook } = require('./lib/exportXlsx');
 const { buildMeetingDocx } = require('./lib/exportDocx');
 const { buildMeetingPdf } = require('./lib/exportPdf');
 const dropbox = require('./lib/dropbox');
+const bigtime = require('./lib/bigtime');
 const aiTaskFill = require('./lib/aiTaskFill');
 const { computeMove } = require('./lib/taskMove');
 
@@ -741,6 +742,41 @@ app.get('/api/meetings/:id/export.pdf', async (req, res, next) => {
 app.get('/api/dropbox/status', (req, res) => {
   const missing = dropbox.missingVars();
   res.json({ configured: missing.length === 0, missing });
+});
+
+// ---- BigTime (budget vs. invoiced-to-date odometer) ----
+const BIGTIME_PROJECT_NAME = process.env.BIGTIME_PROJECT_NAME || 'NEORide EZData (ATTAIN Grant Project)';
+
+app.get('/api/bigtime/status', (req, res) => {
+  const missing = bigtime.missingVars();
+  res.json({ configured: missing.length === 0, missing, projectName: BIGTIME_PROJECT_NAME });
+});
+
+// Temporary diagnostic route — returns BigTime's raw responses so the exact
+// field names for project id / invoiced amount (unconfirmed from BigTime's
+// docs alone) can be read directly and the real /api/bigtime/budget endpoint
+// finalized against them. Remove once that's done.
+app.get('/api/bigtime/debug', async (req, res, next) => {
+  try {
+    const project = await bigtime.findProjectByName(BIGTIME_PROJECT_NAME);
+    if (!project) {
+      const all = await bigtime.bigtimeGet('/project');
+      res.status(404).json({
+        error: `No BigTime project matched "${BIGTIME_PROJECT_NAME}"`,
+        allProjectNames: all.map(bigtime.projectDisplayName),
+        sampleProject: all[0] || null,
+      });
+      return;
+    }
+    let budgetStatus = null;
+    let budgetStatusError = null;
+    try {
+      budgetStatus = await bigtime.getTaskBudgetStatus(project);
+    } catch (e) {
+      budgetStatusError = e.message;
+    }
+    res.json({ project, budgetStatus, budgetStatusError });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // The Dropbox Chooser widget only ever needs the public app key (never the
