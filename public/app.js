@@ -885,6 +885,61 @@ $('#meeting-mode-toggle').addEventListener('click', () => {
   document.execCommand('foreColor', false, meetingModeOn ? MEETING_NOTE_COLOR : '#1b2733');
 });
 
+// The execCommand above (and applyMeetingModeColor on toolbar-created
+// elements) don't cover every way new red-required text can appear — e.g.
+// pressing Enter from existing BLACK text creates a new bullet/sub-bullet
+// that inherits black, and typing into it stays black even though meeting
+// mode is still on. This listener force-colors whatever was JUST typed,
+// regardless of what came before it or how the cursor got there, any time
+// meeting mode is on — but skips text that's already red so normal typing
+// doesn't get re-wrapped in a new span on every single keystroke.
+const MEETING_NOTE_COLOR_RGB = (() => {
+  const probe = document.createElement('span');
+  probe.style.color = MEETING_NOTE_COLOR;
+  document.body.appendChild(probe);
+  const rgb = getComputedStyle(probe).color;
+  probe.remove();
+  return rgb;
+})();
+const MEETING_MODE_INSERT_TYPES = new Set([
+  'insertText', 'insertCompositionText', 'insertFromComposition', 'insertReplacementText',
+]);
+$('#meeting-doc').addEventListener('input', e => {
+  if (!meetingModeOn) return;
+  if (e.inputType && !MEETING_MODE_INSERT_TYPES.has(e.inputType)) return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== 3) return; // only plain text-node insertions
+  const doc = $('#meeting-doc');
+  const parentEl = node.parentElement;
+  if (!parentEl || !doc.contains(parentEl)) return;
+  if (getComputedStyle(parentEl).color === MEETING_NOTE_COLOR_RGB) return; // already red
+
+  const insertedLen = e.data != null ? e.data.length : 1;
+  const caret = range.startOffset;
+  const start = Math.max(0, caret - insertedLen);
+  if (start >= caret) return;
+
+  const wrapRange = document.createRange();
+  wrapRange.setStart(node, start);
+  wrapRange.setEnd(node, caret);
+  const span = document.createElement('span');
+  span.style.color = MEETING_NOTE_COLOR;
+  try {
+    wrapRange.surroundContents(span);
+  } catch {
+    return; // range crosses element boundaries — leave it black rather than risk corrupting structure
+  }
+  const after = document.createRange();
+  after.selectNodeContents(span);
+  after.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(after);
+  savedRange = after.cloneRange();
+});
+
 $('#fmt-bold').addEventListener('click', () => {
   restoreSelection();
   document.execCommand('bold');
@@ -916,12 +971,58 @@ function applyColorToRange(range, color) {
   }
   return true;
 }
-$('#fmt-color').addEventListener('input', () => {
-  if (applyColorToRange(savedRange, $('#fmt-color').value)) {
+// Word-style font color button: the main "A" button always applies whatever
+// color its underline swatch currently shows (one click, no picker) — the
+// caret opens a small palette to change that quick color, which then also
+// applies immediately to the current highlight, same as clicking a swatch
+// in Word's font color dropdown.
+let quickFontColor = '#1b2733';
+function setQuickFontColor(color) {
+  quickFontColor = color;
+  $('#fmt-color-swatch').style.background = color;
+}
+setQuickFontColor(quickFontColor);
+
+function applyQuickColor(color) {
+  if (applyColorToRange(savedRange, color)) {
     $('#meeting-doc').focus();
   } else {
     toast('Highlight some text first, then pick a color.');
   }
+}
+
+$('#fmt-color-apply').addEventListener('click', () => applyQuickColor(quickFontColor));
+
+$('#fmt-color-caret').addEventListener('click', e => {
+  e.stopPropagation();
+  const opening = $('#fmt-color-popup').hidden;
+  $('#fmt-color-popup').hidden = !opening;
+  $('#fmt-color-caret').setAttribute('aria-expanded', String(opening));
+});
+$('#fmt-color-popup').addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => {
+  $('#fmt-color-popup').hidden = true;
+  $('#fmt-color-caret').setAttribute('aria-expanded', 'false');
+});
+
+$$('.fmt-swatch').forEach(btn => btn.addEventListener('click', () => {
+  const color = btn.dataset.color;
+  setQuickFontColor(color);
+  $('#fmt-color-popup').hidden = true;
+  $('#fmt-color-caret').setAttribute('aria-expanded', 'false');
+  applyQuickColor(color);
+}));
+
+// 'change' (fires once, when the picker closes) rather than 'input' (fires
+// continuously while dragging) — applyColorToRange mutates the DOM around
+// savedRange, so re-applying on every drag tick against the same range would
+// hit stale/already-wrapped nodes on the second tick onward.
+$('#fmt-color-native').addEventListener('change', () => {
+  const color = $('#fmt-color-native').value;
+  setQuickFontColor(color);
+  $('#fmt-color-popup').hidden = true;
+  $('#fmt-color-caret').setAttribute('aria-expanded', 'false');
+  applyQuickColor(color);
 });
 
 $('#meeting-add-header').addEventListener('click', () => {

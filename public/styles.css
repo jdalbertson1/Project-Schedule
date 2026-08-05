@@ -354,15 +354,34 @@ tr.editing td { background: #fbfcf3; }
 #meeting-mode-toggle.meeting-mode-active { background: #fbeceb; border-color: var(--danger); color: var(--danger); }
 .fmt-group { display: flex; gap: 4px; }
 .fmt-btn { padding: 10px 14px; min-width: 20px; text-align: center; }
-.fmt-color-btn {
-  display: inline-flex; align-items: center; gap: 5px; padding: 10px 10px; cursor: pointer; font-weight: 700;
+.fmt-color-group { position: relative; display: inline-flex; gap: 1px; }
+.fmt-color-apply {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 8px 5px; font-weight: 700;
+  border-radius: 6px 0 0 6px;
 }
-.fmt-color-btn input[type="color"] {
-  appearance: none; -webkit-appearance: none; width: 18px; height: 18px; border: 1px solid var(--line);
+.fmt-color-swatch { width: 18px; height: 4px; border-radius: 2px; background: var(--danger); }
+.fmt-color-caret {
+  padding: 6px 7px; font-size: 10px; color: var(--ink-faint); border-radius: 0 6px 6px 0; border-left: 0;
+}
+.fmt-color-popup {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; background: #fff; border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; box-shadow: 0 6px 18px rgba(27, 39, 51, 0.15); width: 150px;
+}
+.fmt-color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.fmt-swatch {
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(27, 39, 51, 0.12); cursor: pointer; padding: 0;
+}
+.fmt-swatch:hover { outline: 2px solid var(--ink-faint); outline-offset: 1px; }
+.fmt-more-colors {
+  display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--line-soft); font-size: 12.5px; font-weight: 600; color: var(--ink-soft); cursor: pointer;
+}
+.fmt-more-colors input[type="color"] {
+  appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border: 1px solid var(--line);
   border-radius: 4px; padding: 0; cursor: pointer; background: none;
 }
-.fmt-color-btn input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-.fmt-color-btn input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
+.fmt-more-colors input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.fmt-more-colors input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
 .meeting-doc {
   margin-top: 18px; padding: 20px 24px; border: 1px solid var(--line); border-radius: 10px;
   background: #fff; min-height: 320px; font-size: 14.5px; line-height: 1.6; color: var(--ink);
