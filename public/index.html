@@ -130,6 +130,13 @@
         </label>
         <button type="submit" class="btn btn-primary">New agenda</button>
       </form>
+
+      <div class="meetings-search-row">
+        <input type="search" id="meetings-search" placeholder="Search all meeting notes… e.g. &quot;GCRTA&quot;">
+      </div>
+      <div id="meetings-search-results" hidden></div>
+      <p class="empty-msg" id="meetings-search-empty" hidden>No meetings mention that.</p>
+
       <table class="data-table" id="meetings-table">
         <thead><tr><th>Date</th><th>Title</th><th>Status</th><th>Last updated</th><th></th></tr></thead>
         <tbody></tbody>

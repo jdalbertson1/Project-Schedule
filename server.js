@@ -7,6 +7,7 @@ const { query, init, usePg } = require('./db');
 const { buildScheduleWorkbook } = require('./lib/exportXlsx');
 const { buildMeetingDocx } = require('./lib/exportDocx');
 const { buildMeetingPdf } = require('./lib/exportPdf');
+const { parseDoc } = require('./lib/htmlBlocks');
 const dropbox = require('./lib/dropbox');
 const bigtime = require('./lib/bigtime');
 const aiTaskFill = require('./lib/aiTaskFill');
@@ -263,6 +264,30 @@ async function syncFutureMeetingSnapshots() {
       await query('UPDATE meetings SET content_html = ?, updated_at = ? WHERE id = ?', [updated, now, m.id]);
     }
   }
+}
+
+// Breaks a meeting's saved content_html into searchable plain-text units —
+// roughly one per heading/paragraph/list item/table row, then further split
+// on sentence boundaries within longer blocks — so a search match can be
+// shown with just the sentence/bullet it appeared in, not the whole document.
+function searchableUnits(html) {
+  const blocks = parseDoc(html || '');
+  const units = [];
+  const push = text => {
+    const trimmed = text.replace(/\s+/g, ' ').trim();
+    if (!trimmed) return;
+    trimmed.split(/(?<=[.?!])\s+(?=[A-Z0-9])/).forEach(s => { if (s.trim()) units.push(s.trim()); });
+  };
+  for (const b of blocks) {
+    if (b.type === 'heading' || b.type === 'paragraph') {
+      push(b.runs.map(r => r.text).join(''));
+    } else if (b.type === 'list') {
+      b.items.forEach(item => push(item.runs.map(r => r.text).join('')));
+    } else if (b.type === 'table') {
+      b.rows.forEach(row => push(row.join(' — ')));
+    }
+  }
+  return units;
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +664,28 @@ app.get('/api/meetings', async (req, res, next) => {
   try {
     const rows = await query('SELECT id, title, meeting_date, created_at, updated_at FROM meetings ORDER BY meeting_date DESC, id DESC');
     res.json(rows);
+  } catch (e) { next(e); }
+});
+
+// Registered before /api/meetings/:id so "search" isn't swallowed as an :id value.
+app.get('/api/meetings/search', async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) { res.json([]); return; }
+    const needle = q.toLowerCase();
+    const meetings = await query('SELECT * FROM meetings ORDER BY meeting_date DESC, id DESC');
+    const results = [];
+    for (const m of meetings) {
+      const matches = searchableUnits(m.content_html).filter(u => u.toLowerCase().includes(needle));
+      if (matches.length) {
+        results.push({
+          id: m.id, title: m.title, meetingDate: m.meeting_date,
+          matchCount: matches.length,
+          snippets: matches.slice(0, 5),
+        });
+      }
+    }
+    res.json(results);
   } catch (e) { next(e); }
 });
 

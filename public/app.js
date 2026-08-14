@@ -641,8 +641,11 @@ function meetingStatusChip(m) {
     : '<span class="status-chip status-NotStarted">Agenda only</span>';
 }
 
+let MEETINGS_COUNT = 0;
+
 async function renderMeetingsList() {
   const meetings = await api('/api/meetings');
+  MEETINGS_COUNT = meetings.length;
   const tbody = $('#meetings-table tbody');
   tbody.innerHTML = meetings.map(m => `
     <tr data-id="${m.id}">
@@ -652,9 +655,56 @@ async function renderMeetingsList() {
       <td class="mono">${new Date(m.updated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
       <td class="actions-cell"><div class="row-actions"><button data-act="open">Open</button><button data-act="delete-meeting">Delete</button></div></td>
     </tr>`).join('');
-  $('#meetings-empty').hidden = meetings.length > 0;
-  $('#meetings-table').hidden = meetings.length === 0;
+  if (!$('#meetings-search').value.trim()) {
+    $('#meetings-empty').hidden = meetings.length > 0;
+    $('#meetings-table').hidden = meetings.length === 0;
+  }
 }
+
+/* ---------------- meeting notes search ---------------- */
+function highlightSnippet(text, query) {
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return esc(text);
+  return esc(text.slice(0, idx)) + '<mark>' + esc(text.slice(idx, idx + query.length)) + '</mark>' + esc(text.slice(idx + query.length));
+}
+
+function showMeetingsListView() {
+  $('#meetings-search-results').hidden = true;
+  $('#meetings-search-empty').hidden = true;
+  $('#meetings-empty').hidden = MEETINGS_COUNT > 0;
+  $('#meetings-table').hidden = MEETINGS_COUNT === 0;
+}
+
+async function runMeetingsSearch(query) {
+  const results = await api(`/api/meetings/search?q=${encodeURIComponent(query)}`);
+  $('#meetings-table').hidden = true;
+  $('#meetings-empty').hidden = true;
+  $('#meetings-search-empty').hidden = results.length > 0;
+  $('#meetings-search-results').hidden = results.length === 0;
+  $('#meetings-search-results').innerHTML = results.map(r => `
+    <div class="search-result-card" data-id="${r.id}">
+      <div class="search-result-head">
+        <span class="search-result-title">${esc(r.title)}</span>
+        <span class="search-result-date">${fmtDate(r.meetingDate)}</span>
+      </div>
+      ${r.snippets.map(s => `<p class="search-result-snippet">${highlightSnippet(s, query)}</p>`).join('')}
+      ${r.matchCount > r.snippets.length ? `<p class="search-result-more">+ ${r.matchCount - r.snippets.length} more match${r.matchCount - r.snippets.length > 1 ? 'es' : ''} in this meeting</p>` : ''}
+    </div>`).join('');
+}
+
+let meetingsSearchTimer = null;
+$('#meetings-search').addEventListener('input', () => {
+  clearTimeout(meetingsSearchTimer);
+  const q = $('#meetings-search').value.trim();
+  if (!q) { showMeetingsListView(); return; }
+  meetingsSearchTimer = setTimeout(() => runMeetingsSearch(q).catch(err => toast(err.message)), 250);
+});
+
+$('#meetings-search-results').addEventListener('click', e => {
+  const card = e.target.closest('.search-result-card');
+  if (!card) return;
+  openMeeting(card.dataset.id);
+});
 
 $('#meetings-table tbody').addEventListener('click', async e => {
   const btn = e.target.closest('button[data-act]');
