@@ -799,28 +799,12 @@ app.get('/api/bigtime/status', (req, res) => {
   res.json({ configured: missing.length === 0, missing, projectName: BIGTIME_PROJECT_NAME });
 });
 
-// TEMP diagnostic — inspect the raw per-task fields BigTime returns, to
-// confirm which field actually matches BigTime's own "budget spent" figure.
-// Remove once the real fix is confirmed.
-app.get('/api/bigtime/debug-fields', async (req, res, next) => {
-  try {
-    const project = await bigtime.findProjectByName(BIGTIME_PROJECT_NAME);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-    const tasks = await bigtime.bigtimeGet(`/task/BudgetStatusByProject/${project.SystemId}`);
-    res.json({ project, taskCount: tasks.length, tasks });
-  } catch (e) { next(e); }
-});
-
-// BigTime data only needs to move twice a month (the 8th and 25th), not on
-// every dashboard load — this finds the most recent one of those two
-// checkpoint dates on or before `todayIso`.
+// BigTime data only needs to move weekly (subs invoice monthly at most) —
+// this finds the most recent Monday on or before `todayIso`.
 function lastBudgetCheckpoint(todayIso) {
   const d = new Date(todayIso + 'T00:00:00Z');
-  const day = d.getUTCDate();
-  if (day >= 25) { d.setUTCDate(25); return d.toISOString().slice(0, 10); }
-  if (day >= 8) { d.setUTCDate(8); return d.toISOString().slice(0, 10); }
-  d.setUTCDate(0); // last day of the previous month
-  d.setUTCDate(25);
+  const sinceMonday = (d.getUTCDay() + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
+  d.setUTCDate(d.getUTCDate() - sinceMonday);
   return d.toISOString().slice(0, 10);
 }
 
