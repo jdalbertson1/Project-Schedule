@@ -113,7 +113,7 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | — | Search all meeting notes → `GET /api/meetings/search?q=...` |
 | — | Key documents tiles → `GET/POST /api/documents`, `DELETE /api/documents/:id` |
 | — | Project budget gauge → `GET /api/bigtime/status`, `GET /api/bigtime/budget` |
-| — | Recordings → `GET /api/storage/status`, `GET/POST /api/recordings`, `DELETE /api/recordings/:id`, `POST /api/recordings/upload-url`, `GET /r/:token` |
+| — | Recordings → `GET /api/storage/status`, `GET/POST /api/recordings`, `PATCH/DELETE /api/recordings/:id`, `POST /api/recordings/upload-url`, `GET /r/:token` |
 
 ## External API access
 

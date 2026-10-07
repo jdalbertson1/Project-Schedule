@@ -239,19 +239,16 @@ async function initRecordingsForm() {
   $('#recording-upload-form').hidden = !RECORDINGS_CONFIGURED;
 }
 
-function recMeetingOptionsHtml() {
-  return MEETINGS.map(m => `<option value="${m.id}">${esc(fmtDate(m.meeting_date))} — ${esc(m.title)}</option>`).join('');
+function recMeetingOptionsHtml(selected) {
+  return MEETINGS.map(m =>
+    `<option value="${m.id}"${String(m.id) === String(selected) ? ' selected' : ''}>${esc(fmtDate(m.meeting_date))} — ${esc(m.title)}</option>`
+  ).join('');
 }
 
-async function renderRecordings() {
-  $('#rec-phase').innerHTML = '<option value="">—</option>' + phaseOptionsHtml();
-  $('#rec-meeting').innerHTML = '<option value="">— None —</option>' + recMeetingOptionsHtml();
+let RECORDINGS_CACHE = [];
 
-  const recs = await api('/api/recordings');
-  const tbody = $('#recordings-table tbody');
-  $('#recordings-empty').hidden = recs.length > 0;
-  $('#recordings-table').hidden = recs.length === 0;
-  tbody.innerHTML = recs.map(r => `
+function recordingRowHtml(r) {
+  return `
     <tr data-id="${r.id}">
       <td>${esc(r.title)}</td>
       <td>${esc(r.phase || '—')}</td>
@@ -259,11 +256,23 @@ async function renderRecordings() {
       <td class="mono">${fmtDate(r.recorded_date)}</td>
       <td class="mono">${fmtBytes(r.size_bytes)}</td>
       <td class="actions-cell"><div class="row-actions">
-        <button data-act="copy-link" data-token="${esc(r.share_token)}">Copy link</button>
-        <a class="btn" href="/r/${esc(r.share_token)}" target="_blank" rel="noopener">Open</a>
-        <button data-act="delete-recording">Delete</button>
+        <button data-act="edit-recording" title="Edit details">Edit</button>
+        <button data-act="copy-link" data-token="${esc(r.share_token)}" title="Copy share link">Link</button>
+        <a href="/r/${esc(r.share_token)}" target="_blank" rel="noopener" title="Open recording">Open</a>
+        <button data-act="delete-recording" title="Delete recording">Delete</button>
       </div></td>
-    </tr>`).join('');
+    </tr>`;
+}
+
+async function renderRecordings() {
+  $('#rec-phase').innerHTML = '<option value="">—</option>' + phaseOptionsHtml();
+  $('#rec-meeting').innerHTML = '<option value="">— None —</option>' + recMeetingOptionsHtml();
+
+  RECORDINGS_CACHE = await api('/api/recordings');
+  const tbody = $('#recordings-table tbody');
+  $('#recordings-empty').hidden = RECORDINGS_CACHE.length > 0;
+  $('#recordings-table').hidden = RECORDINGS_CACHE.length === 0;
+  tbody.innerHTML = RECORDINGS_CACHE.map(recordingRowHtml).join('');
 }
 
 $('#recordings-table').addEventListener('click', async e => {
@@ -283,6 +292,42 @@ $('#recordings-table').addEventListener('click', async e => {
     } catch { toast(link); }
     return;
   }
+
+  const editBtn = e.target.closest('[data-act="edit-recording"]');
+  if (editBtn) {
+    const tr = editBtn.closest('tr[data-id]');
+    const r = RECORDINGS_CACHE.find(x => String(x.id) === tr.dataset.id);
+    if (!r) return;
+    tr.classList.add('editing');
+    const cells = tr.children;
+    cells[0].innerHTML = `<input name="title" value="${esc(r.title)}">`;
+    cells[1].innerHTML = `<select name="phase"><option value="">—</option>${phaseOptionsHtml(r.phase)}</select>`;
+    cells[2].innerHTML = `<select name="meetingId"><option value="">— None —</option>${recMeetingOptionsHtml(r.meeting_id)}</select>`;
+    cells[3].innerHTML = `<input type="date" name="recordedDate" value="${r.recorded_date || ''}">`;
+    cells[5].innerHTML = `<div class="row-actions"><button data-act="save-recording">Save</button><button data-act="cancel-recording">Cancel</button></div>`;
+    return;
+  }
+
+  if (e.target.closest('[data-act="cancel-recording"]')) { await renderRecordings(); return; }
+
+  const saveBtn = e.target.closest('[data-act="save-recording"]');
+  if (saveBtn) {
+    const tr = saveBtn.closest('tr[data-id]');
+    const val = name => tr.querySelector(`[name="${name}"]`)?.value;
+    try {
+      await api(`/api/recordings/${tr.dataset.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: val('title'), phase: val('phase') || null,
+          meetingId: val('meetingId') || null, recordedDate: val('recordedDate') || null,
+        }),
+      });
+      toast('Recording updated');
+      await renderRecordings();
+    } catch (err) { toast(err.message); }
+    return;
+  }
+
   const delBtn = e.target.closest('[data-act="delete-recording"]');
   if (delBtn) {
     const tr = delBtn.closest('tr[data-id]');

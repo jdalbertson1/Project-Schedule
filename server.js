@@ -928,6 +928,43 @@ app.post('/api/recordings', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Metadata-only edit — title, phase, recorded date, linked meeting. The
+// uploaded file itself is immutable through this route; delete and
+// re-upload to replace the actual recording.
+app.patch('/api/recordings/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await query('SELECT * FROM recordings WHERE id = ?', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Recording not found.' });
+    const b = req.body || {};
+
+    const fields = {};
+    if (b.title !== undefined) {
+      const title = String(b.title).trim();
+      if (!title) return res.status(400).json({ error: 'Title is required.' });
+      fields.title = title;
+    }
+    if (b.phase !== undefined) fields.phase = b.phase || null;
+    if (b.recordedDate !== undefined) fields.recorded_date = b.recordedDate || null;
+    if (b.meetingId !== undefined) {
+      if (b.meetingId == null || b.meetingId === '') {
+        fields.meeting_id = null;
+      } else {
+        const meetingId = Number(b.meetingId);
+        const exists = await query('SELECT id FROM meetings WHERE id = ?', [meetingId]);
+        if (!exists.length) return res.status(400).json({ error: 'That meeting no longer exists.' });
+        fields.meeting_id = meetingId;
+      }
+    }
+
+    const keys = Object.keys(fields);
+    if (!keys.length) return res.json({ ok: true });
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    await query(`UPDATE recordings SET ${setSql} WHERE id = ?`, [...keys.map(k => fields[k]), id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 app.delete('/api/recordings/:id', async (req, res, next) => {
   try {
     const rows = await query('SELECT * FROM recordings WHERE id = ?', [Number(req.params.id)]);
