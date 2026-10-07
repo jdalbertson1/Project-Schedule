@@ -255,7 +255,7 @@ async function renderRecordings() {
     <tr data-id="${r.id}">
       <td>${esc(r.title)}</td>
       <td>${esc(r.phase || '—')}</td>
-      <td>${r.meeting_title ? esc(r.meeting_title) : '—'}</td>
+      <td>${r.meeting_title ? `<a href="#" class="rec-meeting-link" data-meeting-id="${r.meeting_id}">${esc(r.meeting_title)}</a>` : '—'}</td>
       <td class="mono">${fmtDate(r.recorded_date)}</td>
       <td class="mono">${fmtBytes(r.size_bytes)}</td>
       <td class="actions-cell"><div class="row-actions">
@@ -267,6 +267,13 @@ async function renderRecordings() {
 }
 
 $('#recordings-table').addEventListener('click', async e => {
+  const meetingLink = e.target.closest('.rec-meeting-link');
+  if (meetingLink) {
+    e.preventDefault();
+    activateTab('meetings');
+    openMeeting(meetingLink.dataset.meetingId).catch(err => toast(err.message));
+    return;
+  }
   const copyBtn = e.target.closest('[data-act="copy-link"]');
   if (copyBtn) {
     const link = `${location.origin}/r/${copyBtn.dataset.token}`;
@@ -302,44 +309,80 @@ function uploadWithProgress(url, file, onProgress) {
   });
 }
 
-$('#recording-upload-form').addEventListener('submit', async e => {
+// Each submit starts its own job and the form resets immediately, so you
+// can queue up the next recording while earlier ones are still uploading —
+// jobs run concurrently, each tracked by its own row in the queue list.
+let uploadJobSeq = 0;
+
+function renderUploadJobRow(job) {
+  let row = document.getElementById(job.rowId);
+  if (!row) {
+    row = document.createElement('div');
+    row.id = job.rowId;
+    row.className = 'upload-queue-row';
+    $('#recording-upload-queue').appendChild(row);
+  }
+  row.classList.toggle('upload-queue-row-error', job.status === 'error');
+  row.classList.toggle('upload-queue-row-done', job.status === 'done');
+  const pct = Math.round((job.fraction || 0) * 100);
+  const statusText = job.status === 'error' ? job.error
+    : job.status === 'done' ? 'Done'
+    : job.status === 'saving' ? 'Finishing…'
+    : `Uploading… ${pct}%`;
+  row.innerHTML = `
+    <span class="upload-queue-title">${esc(job.title)}</span>
+    <span class="upload-queue-bar"><i style="width:${job.status === 'done' ? 100 : pct}%"></i></span>
+    <span class="upload-queue-status">${esc(statusText)}</span>`;
+  if (job.status === 'done') setTimeout(() => row.remove(), 4000);
+}
+
+async function runUploadJob(job) {
+  renderUploadJobRow(job);
+  try {
+    const { uploadUrl, key } = await api('/api/recordings/upload-url', {
+      method: 'POST',
+      body: JSON.stringify({ filename: job.file.name, contentType: job.file.type }),
+    });
+    await uploadWithProgress(uploadUrl, job.file, frac => {
+      job.fraction = frac;
+      renderUploadJobRow(job);
+    });
+    job.status = 'saving';
+    renderUploadJobRow(job);
+    await api('/api/recordings', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: job.title, key, contentType: job.file.type, sizeBytes: job.file.size,
+        phase: job.phase, recordedDate: job.recordedDate, meetingId: job.meetingId,
+      }),
+    });
+    job.status = 'done';
+    renderUploadJobRow(job);
+    await renderRecordings();
+  } catch (err) {
+    job.status = 'error';
+    job.error = err.message;
+    renderUploadJobRow(job);
+  }
+}
+
+$('#recording-upload-form').addEventListener('submit', e => {
   e.preventDefault();
   const file = $('#rec-file').files[0];
   const title = $('#rec-title').value.trim();
   if (!file || !title) return;
 
-  const btn = $('#rec-upload-btn');
-  const progress = $('#recording-upload-progress');
-  btn.disabled = true;
-  progress.hidden = false;
-  progress.textContent = `Uploading… 0%`;
-
-  try {
-    const { uploadUrl, key } = await api('/api/recordings/upload-url', {
-      method: 'POST',
-      body: JSON.stringify({ filename: file.name, contentType: file.type }),
-    });
-    await uploadWithProgress(uploadUrl, file, frac => {
-      progress.textContent = `Uploading… ${Math.round(frac * 100)}%`;
-    });
-    await api('/api/recordings', {
-      method: 'POST',
-      body: JSON.stringify({
-        title, key, contentType: file.type, sizeBytes: file.size,
-        phase: $('#rec-phase').value || null,
-        recordedDate: $('#rec-date').value || null,
-        meetingId: $('#rec-meeting').value || null,
-      }),
-    });
-    toast('Recording uploaded');
-    e.target.reset();
-    await renderRecordings();
-  } catch (err) {
-    toast(err.message);
-  } finally {
-    btn.disabled = false;
-    progress.hidden = true;
-  }
+  const job = {
+    rowId: `upload-job-${++uploadJobSeq}`,
+    file, title,
+    phase: $('#rec-phase').value || null,
+    recordedDate: $('#rec-date').value || null,
+    meetingId: $('#rec-meeting').value || null,
+    status: 'uploading', fraction: 0,
+  };
+  $('#recording-queue-hint').hidden = false;
+  e.target.reset();
+  runUploadJob(job);
 });
 
 /* ---------------- schedule + gantt ---------------- */
