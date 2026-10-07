@@ -247,19 +247,22 @@ function recMeetingOptionsHtml(selected) {
 
 let RECORDINGS_CACHE = [];
 
+const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+const ICON_LINK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07L12.5 19.5"/></svg>';
+const ICON_DELETE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+
 function recordingRowHtml(r) {
   return `
     <tr data-id="${r.id}">
-      <td>${esc(r.title)}</td>
+      <td><a class="rec-title-link" href="/r/${esc(r.share_token)}" target="_blank" rel="noopener" title="Open recording">${esc(r.title)}</a></td>
       <td>${esc(r.phase || '—')}</td>
       <td>${r.meeting_title ? `<a href="#" class="rec-meeting-link" data-meeting-id="${r.meeting_id}">${esc(r.meeting_title)}</a>` : '—'}</td>
       <td class="mono">${fmtDate(r.recorded_date)}</td>
       <td class="mono">${fmtBytes(r.size_bytes)}</td>
       <td class="actions-cell"><div class="row-actions">
-        <button data-act="edit-recording" title="Edit details">Edit</button>
-        <button data-act="copy-link" data-token="${esc(r.share_token)}" title="Copy share link">Link</button>
-        <a href="/r/${esc(r.share_token)}" target="_blank" rel="noopener" title="Open recording">Open</a>
-        <button data-act="delete-recording" title="Delete recording">Delete</button>
+        <button class="icon-btn" data-act="edit-recording" aria-label="Edit details" title="Edit details">${ICON_EDIT}</button>
+        <button class="icon-btn" data-act="copy-link" data-token="${esc(r.share_token)}" aria-label="Copy share link" title="Copy share link">${ICON_LINK}</button>
+        <button class="icon-btn icon-btn-danger" data-act="delete-recording" aria-label="Delete recording" title="Delete recording">${ICON_DELETE}</button>
       </div></td>
     </tr>`;
 }

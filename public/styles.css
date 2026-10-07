@@ -279,17 +279,33 @@ tr.editing td.sticky-col, tr.editing td.sticky-col-2 { background: #fbfcf3; }
 .row-actions button:active, .row-actions a:active { box-shadow: none; transform: translateY(1px); }
 .row-actions button:focus-visible, .row-actions a:focus-visible { outline: 2px solid var(--ph-1); outline-offset: 1px; }
 
-.row-actions button[data-act="edit"]:hover,
-.row-actions button[data-act="edit-recording"]:hover { border-color: var(--ph-1); color: var(--ph-1); }
+.row-actions button[data-act="edit"]:hover { border-color: var(--ph-1); color: var(--ph-1); }
 .row-actions button[data-act="save"],
 .row-actions button[data-act="save-recording"] { border-color: var(--ph-1); background: var(--ph-1); color: #fff; }
 .row-actions button[data-act="save"]:hover,
 .row-actions button[data-act="save-recording"]:hover { background: #244d70; border-color: #244d70; color: #fff; }
-.row-actions button[data-act="delete"]:hover,
-.row-actions button[data-act="delete-recording"]:hover { border-color: var(--danger); color: var(--danger); background: #fbeceb; }
+.row-actions button[data-act="delete"]:hover { border-color: var(--danger); color: var(--danger); background: #fbeceb; }
 .row-actions button[data-act="cancel"]:hover,
 .row-actions button[data-act="cancel-recording"]:hover { border-color: var(--ink-faint); }
-.row-actions a[target="_blank"]:hover { border-color: var(--ph-1); color: var(--ph-1); }
+
+/* icon-only row actions (recordings table) — the extra button.icon-btn
+   specificity is needed to beat the ".row-actions button" pill rules above */
+.row-actions button.icon-btn {
+  appearance: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border-radius: 999px; flex: none;
+  border: 1px solid var(--line); background: #fff; color: var(--ink-soft); cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.row-actions button.icon-btn svg { width: 14px; height: 14px; }
+.row-actions button.icon-btn:hover { border-color: var(--ph-1); color: var(--ph-1); box-shadow: 0 1px 3px rgba(27, 39, 51, 0.1); }
+.row-actions button.icon-btn:active { box-shadow: none; transform: translateY(1px); }
+.row-actions button.icon-btn:focus-visible { outline: 2px solid var(--ph-1); outline-offset: 1px; }
+.row-actions button.icon-btn-danger:hover { border-color: var(--danger); color: var(--danger); background: #fbeceb; }
+
+.rec-title-link, .rec-meeting-link {
+  color: var(--ink); text-decoration: none; font-weight: 600; border-bottom: 1px solid transparent;
+}
+.rec-title-link:hover, .rec-meeting-link:hover { color: var(--ph-1); border-bottom-color: currentColor; }
 
 /* inline edit row */
 tr.editing td { background: #fbfcf3; }
@@ -354,9 +370,16 @@ tr.editing td { background: #fbfcf3; }
 /* ---------- meetings ---------- */
 .new-meeting-row { display: flex; gap: 16px; align-items: flex-end; margin-bottom: 18px; flex-wrap: wrap; }
 .new-meeting-row label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
-.new-meeting-row input {
-  font: 500 14px var(--font-ui); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+.new-meeting-row input, .new-meeting-row select {
+  font: 500 14px var(--font-ui); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; color: var(--ink); height: 37px; box-sizing: border-box;
 }
+.new-meeting-row input[type="file"] { padding: 7px 10px; }
+
+.rec-upload-form label { min-width: 110px; }
+.rec-upload-form select#rec-phase { width: 150px; }
+.rec-upload-form select#rec-meeting { width: 240px; }
+.rec-upload-form input#rec-title { width: 220px; }
 .meetings-search-row { margin-bottom: 16px; }
 #meetings-search {
   width: 100%; max-width: 420px; font: 500 14px var(--font-ui); padding: 9px 12px;

@@ -202,17 +202,17 @@
       </div>
       <p class="empty-msg" id="recordings-unconfigured-msg" hidden>Connect bucket storage (see README) to upload and share recordings.</p>
 
-      <form id="recording-upload-form" class="new-meeting-row" hidden>
+      <form id="recording-upload-form" class="new-meeting-row rec-upload-form" hidden>
         <label>Title
           <input type="text" name="title" id="rec-title" placeholder="e.g. GCRTA discovery session" required>
         </label>
-        <label>Phase <span class="opt">optional</span>
+        <label>Phase
           <select name="phase" id="rec-phase"><option value="">—</option></select>
         </label>
-        <label>Date <span class="opt">optional</span>
+        <label>Date
           <input type="date" name="recordedDate" id="rec-date">
         </label>
-        <label>Linked meeting notes <span class="opt">optional</span>
+        <label>Linked meeting notes
           <select name="meetingId" id="rec-meeting"><option value="">— None —</option></select>
         </label>
         <label>File
