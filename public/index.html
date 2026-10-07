@@ -26,6 +26,7 @@
     <button class="tab" data-view="schedule" role="tab">Schedule</button>
     <button class="tab" data-view="add" role="tab">Add task</button>
     <button class="tab" data-view="meetings" role="tab">Meetings</button>
+    <button class="tab" data-view="recordings" role="tab">Recordings</button>
     <span class="tab-link export-menu">
       <button class="tab export-toggle" id="export-toggle" aria-haspopup="true" aria-expanded="false">Export ▾</button>
       <span class="export-dropdown" id="export-dropdown" hidden>
@@ -189,6 +190,43 @@
         </div>
       </div>
       <div class="meeting-doc" id="meeting-doc" contenteditable="true"></div>
+    </div>
+  </section>
+
+  <!-- RECORDINGS -->
+  <section id="view-recordings" class="view">
+    <div class="panel" id="recordings-panel">
+      <div class="panel-head">
+        <h2>Meeting recordings</h2>
+        <p class="hint">A central place for recordings from discovery sessions and other calls. Each gets a permanent link under this site — attaching it to a set of meeting notes is optional.</p>
+      </div>
+      <p class="empty-msg" id="recordings-unconfigured-msg" hidden>Connect bucket storage (see README) to upload and share recordings.</p>
+
+      <form id="recording-upload-form" class="new-meeting-row" hidden>
+        <label>Title
+          <input type="text" name="title" id="rec-title" placeholder="e.g. GCRTA discovery session" required>
+        </label>
+        <label>Phase <span class="opt">optional</span>
+          <select name="phase" id="rec-phase"><option value="">—</option></select>
+        </label>
+        <label>Date <span class="opt">optional</span>
+          <input type="date" name="recordedDate" id="rec-date">
+        </label>
+        <label>Linked meeting notes <span class="opt">optional</span>
+          <select name="meetingId" id="rec-meeting"><option value="">— None —</option></select>
+        </label>
+        <label>File
+          <input type="file" id="rec-file" accept="video/*,audio/*" required>
+        </label>
+        <button type="submit" class="btn btn-primary" id="rec-upload-btn">Upload</button>
+      </form>
+      <div id="recording-upload-progress" class="form-msg" role="status" hidden></div>
+
+      <table class="data-table" id="recordings-table">
+        <thead><tr><th>Title</th><th>Phase</th><th>Linked meeting</th><th>Date</th><th>Size</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="empty-msg" id="recordings-empty" hidden>No recordings yet — upload one above.</p>
     </div>
   </section>
 

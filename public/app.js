@@ -16,6 +16,13 @@ const fmtDate = iso => {
 };
 const fmtPct = p => p == null ? '—' : Math.round(p * 100) + '%';
 const fmtMoney = n => n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const fmtBytes = n => {
+  if (n == null) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+};
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 async function api(path, opts = {}) {
@@ -219,6 +226,121 @@ function openDocPhasePrompt(title, url) {
     } catch (err) { toast(err.message); }
   });
 }
+
+/* ---------------- meeting recordings (S3-compatible bucket) ---------------- */
+let RECORDINGS_CONFIGURED = false;
+
+async function initRecordingsForm() {
+  try {
+    const status = await api('/api/storage/status');
+    RECORDINGS_CONFIGURED = status.configured;
+  } catch { RECORDINGS_CONFIGURED = false; }
+  $('#recordings-unconfigured-msg').hidden = RECORDINGS_CONFIGURED;
+  $('#recording-upload-form').hidden = !RECORDINGS_CONFIGURED;
+}
+
+function recMeetingOptionsHtml() {
+  return MEETINGS.map(m => `<option value="${m.id}">${esc(fmtDate(m.meeting_date))} — ${esc(m.title)}</option>`).join('');
+}
+
+async function renderRecordings() {
+  $('#rec-phase').innerHTML = '<option value="">—</option>' + phaseOptionsHtml();
+  $('#rec-meeting').innerHTML = '<option value="">— None —</option>' + recMeetingOptionsHtml();
+
+  const recs = await api('/api/recordings');
+  const tbody = $('#recordings-table tbody');
+  $('#recordings-empty').hidden = recs.length > 0;
+  $('#recordings-table').hidden = recs.length === 0;
+  tbody.innerHTML = recs.map(r => `
+    <tr data-id="${r.id}">
+      <td>${esc(r.title)}</td>
+      <td>${esc(r.phase || '—')}</td>
+      <td>${r.meeting_title ? esc(r.meeting_title) : '—'}</td>
+      <td class="mono">${fmtDate(r.recorded_date)}</td>
+      <td class="mono">${fmtBytes(r.size_bytes)}</td>
+      <td class="actions-cell"><div class="row-actions">
+        <button data-act="copy-link" data-token="${esc(r.share_token)}">Copy link</button>
+        <a class="btn" href="/r/${esc(r.share_token)}" target="_blank" rel="noopener">Open</a>
+        <button data-act="delete-recording">Delete</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+$('#recordings-table').addEventListener('click', async e => {
+  const copyBtn = e.target.closest('[data-act="copy-link"]');
+  if (copyBtn) {
+    const link = `${location.origin}/r/${copyBtn.dataset.token}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast('Link copied');
+    } catch { toast(link); }
+    return;
+  }
+  const delBtn = e.target.closest('[data-act="delete-recording"]');
+  if (delBtn) {
+    const tr = delBtn.closest('tr[data-id]');
+    if (!confirm('Delete this recording? This removes the file from storage permanently.')) return;
+    try {
+      await api(`/api/recordings/${tr.dataset.id}`, { method: 'DELETE' });
+      toast('Recording deleted');
+      await renderRecordings();
+    } catch (err) { toast(err.message); }
+  }
+});
+
+function uploadWithProgress(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`Upload failed (${xhr.status})`));
+    xhr.onerror = () => reject(new Error('Upload failed — network error.'));
+    xhr.send(file);
+  });
+}
+
+$('#recording-upload-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const file = $('#rec-file').files[0];
+  const title = $('#rec-title').value.trim();
+  if (!file || !title) return;
+
+  const btn = $('#rec-upload-btn');
+  const progress = $('#recording-upload-progress');
+  btn.disabled = true;
+  progress.hidden = false;
+  progress.textContent = `Uploading… 0%`;
+
+  try {
+    const { uploadUrl, key } = await api('/api/recordings/upload-url', {
+      method: 'POST',
+      body: JSON.stringify({ filename: file.name, contentType: file.type }),
+    });
+    await uploadWithProgress(uploadUrl, file, frac => {
+      progress.textContent = `Uploading… ${Math.round(frac * 100)}%`;
+    });
+    await api('/api/recordings', {
+      method: 'POST',
+      body: JSON.stringify({
+        title, key, contentType: file.type, sizeBytes: file.size,
+        phase: $('#rec-phase').value || null,
+        recordedDate: $('#rec-date').value || null,
+        meetingId: $('#rec-meeting').value || null,
+      }),
+    });
+    toast('Recording uploaded');
+    e.target.reset();
+    await renderRecordings();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+    progress.hidden = true;
+  }
+});
 
 /* ---------------- schedule + gantt ---------------- */
 let LISTS = null;
@@ -642,9 +764,11 @@ function meetingStatusChip(m) {
 }
 
 let MEETINGS_COUNT = 0;
+let MEETINGS = [];
 
 async function renderMeetingsList() {
   const meetings = await api('/api/meetings');
+  MEETINGS = meetings;
   MEETINGS_COUNT = meetings.length;
   const tbody = $('#meetings-table tbody');
   tbody.innerHTML = meetings.map(m => `
@@ -1188,10 +1312,11 @@ $('#meeting-dropbox').addEventListener('click', async () => {
 /* ---------------- boot ---------------- */
 async function refreshAll() {
   await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList(), renderBudgetGauge()]);
-  await renderDocuments(); // depends on DASHBOARD_PHASES, set by renderDashboard above
+  await Promise.all([renderDocuments(), renderRecordings()]); // depend on DASHBOARD_PHASES / MEETINGS set above
 }
 $('#nm-date').value = todayISOClient();
 refreshAll().catch(err => toast(err.message));
 initAiFillPanel().catch(() => {});
+initRecordingsForm().catch(() => {});
 initDropboxChooser().catch(() => {});
 routeFromLocation({ replace: true });

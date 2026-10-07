@@ -3,6 +3,7 @@
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const { query, init, usePg } = require('./db');
 const { buildScheduleWorkbook } = require('./lib/exportXlsx');
 const { buildMeetingDocx } = require('./lib/exportDocx');
@@ -10,6 +11,7 @@ const { buildMeetingPdf } = require('./lib/exportPdf');
 const { parseDoc } = require('./lib/htmlBlocks');
 const dropbox = require('./lib/dropbox');
 const bigtime = require('./lib/bigtime');
+const storage = require('./lib/storage');
 const aiTaskFill = require('./lib/aiTaskFill');
 const { computeMove } = require('./lib/taskMove');
 
@@ -861,6 +863,92 @@ app.delete('/api/documents/:id', async (req, res, next) => {
   try {
     await query('DELETE FROM documents WHERE id = ?', [Number(req.params.id)]);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ---- Meeting recordings (stored in an S3-compatible bucket — see lib/storage.js) ----
+app.get('/api/storage/status', (req, res) => {
+  const missing = storage.missingVars();
+  res.json({ configured: missing.length === 0, missing });
+});
+
+app.get('/api/recordings', async (req, res, next) => {
+  try {
+    const rows = await query(`
+      SELECT r.*, m.title AS meeting_title
+      FROM recordings r LEFT JOIN meetings m ON m.id = r.meeting_id
+      ORDER BY r.recorded_date DESC, r.created_at DESC
+    `);
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+// Step 1 of upload: hand the browser a presigned URL it can PUT the file
+// bytes to directly — the file never passes through this server.
+app.post('/api/recordings/upload-url', async (req, res, next) => {
+  try {
+    const { filename, contentType } = req.body || {};
+    if (!filename) return res.status(400).json({ error: 'filename is required.' });
+    const key = storage.newKey(filename);
+    const uploadUrl = await storage.presignUpload(key, contentType || 'application/octet-stream');
+    res.json({ uploadUrl, key });
+  } catch (e) { next(e); }
+});
+
+// Step 2: once the browser's direct upload to the bucket succeeds, record
+// the metadata row (and mint the permanent share link's token).
+app.post('/api/recordings', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const title = String(b.title || '').trim();
+    const key = String(b.key || '').trim();
+    if (!title) return res.status(400).json({ error: 'Title is required.' });
+    if (!key) return res.status(400).json({ error: 'Missing upload key — upload the file first.' });
+
+    let meetingId = null;
+    if (b.meetingId != null && b.meetingId !== '') {
+      meetingId = Number(b.meetingId);
+      const exists = await query('SELECT id FROM meetings WHERE id = ?', [meetingId]);
+      if (!exists.length) return res.status(400).json({ error: 'That meeting no longer exists.' });
+    }
+
+    const shareToken = crypto.randomBytes(12).toString('hex');
+    const now = new Date().toISOString();
+    const inserted = await query(
+      usePg
+        ? `INSERT INTO recordings (meeting_id, title, phase, recorded_date, s3_key, content_type, size_bytes, share_token, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+        : `INSERT INTO recordings (meeting_id, title, phase, recorded_date, s3_key, content_type, size_bytes, share_token, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [meetingId, title, b.phase || null, b.recordedDate || null, key,
+       b.contentType || null, b.sizeBytes ? Number(b.sizeBytes) : null, shareToken, now]
+    );
+    const row = usePg ? inserted[0] : (await query('SELECT * FROM recordings WHERE id = last_insert_rowid()'))[0];
+    res.status(201).json(row);
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/recordings/:id', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM recordings WHERE id = ?', [Number(req.params.id)]);
+    if (!rows.length) return res.status(404).json({ error: 'Recording not found.' });
+    await storage.deleteObject(rows[0].s3_key).catch(() => {}); // DB row is the source of truth either way
+    await query('DELETE FROM recordings WHERE id = ?', [Number(req.params.id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Permanent share link — stays valid forever even though the presigned URL
+// it redirects to is regenerated (and re-expires) on every visit. Still
+// behind the site-wide APP_PASSWORD like the rest of the app; the per-
+// recording token just keeps recordings from being enumerable by guessing.
+app.get('/r/:token', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM recordings WHERE share_token = ?', [req.params.token]);
+    if (!rows.length) return res.status(404).send('Recording not found.');
+    const rec = rows[0];
+    const url = await storage.presignDownload(rec.s3_key, rec.title);
+    res.redirect(302, url);
   } catch (e) { next(e); }
 });
 

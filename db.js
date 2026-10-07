@@ -76,6 +76,19 @@ async function init() {
     updated_at TEXT NOT NULL
   )`);
 
+  await query(`CREATE TABLE IF NOT EXISTS recordings (
+    ${idCol},
+    meeting_id INTEGER,
+    title TEXT NOT NULL,
+    phase TEXT,
+    recorded_date TEXT,
+    s3_key TEXT NOT NULL,
+    content_type TEXT,
+    size_bytes INTEGER,
+    share_token TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+  )`);
+
   const existing = await query('SELECT COUNT(*) AS n FROM tasks');
   const n = Number(existing[0].n);
   if (n === 0) {
