@@ -877,30 +877,6 @@ app.put('/api/connectors/:type', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// TEMPORARY — runs the one-time env-var-to-DB connector migration from
-// inside the server (so it can reach the internal DB), without needing the
-// raw Postgres credential locally. Remove this route once run against
-// production. Gated by the same connector admin password; never logs secrets.
-app.post('/api/connectors/run-migration', async (req, res, next) => {
-  try {
-    if (!checkConnectorAdminPassword(req)) return res.status(401).json({ error: 'Incorrect connector admin password.' });
-    const results = {};
-    for (const [type, schema] of Object.entries(connectors.SCHEMAS)) {
-      const existing = await query('SELECT id FROM connector_configs WHERE connector_type = ?', [type]);
-      if (existing.length) { results[type] = 'already in DB — skipped'; continue; }
-      const fromEnv = {};
-      for (const field of schema.fields) {
-        const v = process.env[schema.envFallback[field]];
-        if (v) fromEnv[field] = v;
-      }
-      if (!Object.keys(fromEnv).length) { results[type] = 'no env vars set — nothing to migrate'; continue; }
-      await connectors.setConfig(type, fromEnv);
-      results[type] = `migrated (fields: ${Object.keys(fromEnv).join(', ')})`;
-    }
-    res.json(results);
-  } catch (e) { next(e); }
-});
-
 app.get('/api/dropbox/status', async (req, res, next) => {
   try {
     const status = await connectors.getStatus('dropbox');
