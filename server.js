@@ -12,6 +12,7 @@ const { parseDoc } = require('./lib/htmlBlocks');
 const dropbox = require('./lib/dropbox');
 const bigtime = require('./lib/bigtime');
 const storage = require('./lib/storage');
+const connectors = require('./lib/connectors');
 const aiTaskFill = require('./lib/aiTaskFill');
 const { computeMove } = require('./lib/taskMove');
 
@@ -45,6 +46,22 @@ function checkApiKey(req) {
   const bearer = header.replace(/^Bearer\s+/i, '');
   const provided = req.get('X-API-Key') || bearer;
   return !!provided && provided === process.env.API_KEY;
+}
+
+// A second, separate password just for editing connector credentials —
+// deliberately distinct from APP_PASSWORD, since everyone who can open this
+// site knows that one. There's no role system in this single-tenant app to
+// gate connector edits against otherwise, so this is a simple stand-in for
+// "only an admin can do this" until a real RBAC layer exists (see
+// ARCHITECTURE.md for the carried-forward multi-tenant design). Viewing
+// connector status is not gated — only PUT (actually changing something) is.
+function checkConnectorAdminPassword(req) {
+  const expected = process.env.CONNECTOR_ADMIN_PASSWORD;
+  if (!expected) return false; // refuse edits entirely until this is deliberately set
+  const provided = req.get('X-Connector-Admin-Password') || '';
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 // ---- Optional password protection for the web UI (set APP_PASSWORD in Railway variables) ----
@@ -788,17 +805,54 @@ app.get('/api/meetings/:id/export.pdf', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.get('/api/dropbox/status', (req, res) => {
-  const missing = dropbox.missingVars();
-  res.json({ configured: missing.length === 0, missing });
+// ---- Unified connector settings (BigTime / Dropbox / storage) ----
+// Reads status for all 3 in one call (for the Connectors settings screen);
+// viewing is unrestricted, editing requires the separate connector admin
+// password (see checkConnectorAdminPassword above).
+app.get('/api/connectors', async (req, res, next) => {
+  try {
+    const [bigtimeStatus, dropboxStatus, storageStatus] = await Promise.all([
+      connectors.getStatus('bigtime'),
+      connectors.getStatus('dropbox'),
+      connectors.getStatus('storage'),
+    ]);
+    res.json({
+      adminPasswordConfigured: !!process.env.CONNECTOR_ADMIN_PASSWORD,
+      bigtime: bigtimeStatus,
+      dropbox: dropboxStatus,
+      storage: storageStatus,
+    });
+  } catch (e) { next(e); }
 });
 
-// ---- BigTime (budget vs. invoiced-to-date odometer) ----
-const BIGTIME_PROJECT_NAME = process.env.BIGTIME_PROJECT_NAME || 'NEORide EZData (ATTAIN Grant Project)';
+app.post('/api/connectors/unlock', (req, res) => {
+  if (!checkConnectorAdminPassword(req)) return res.status(401).json({ error: 'Incorrect connector admin password.' });
+  res.json({ ok: true });
+});
 
-app.get('/api/bigtime/status', (req, res) => {
-  const missing = bigtime.missingVars();
-  res.json({ configured: missing.length === 0, missing, projectName: BIGTIME_PROJECT_NAME });
+app.put('/api/connectors/:type', async (req, res, next) => {
+  try {
+    if (!connectors.SCHEMAS[req.params.type]) return res.status(404).json({ error: 'Unknown connector type.' });
+    if (!checkConnectorAdminPassword(req)) return res.status(401).json({ error: 'Incorrect connector admin password.' });
+    await connectors.setConfig(req.params.type, req.body || {});
+    if (req.params.type === 'bigtime') budgetCache = null; // force a fresh fetch under the new config
+    const status = await connectors.getStatus(req.params.type);
+    res.json(status);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/dropbox/status', async (req, res, next) => {
+  try {
+    const status = await connectors.getStatus('dropbox');
+    res.json({ configured: status.configured, missing: [] }); // see the Connectors settings tab for what's unset
+  } catch (e) { next(e); }
+});
+
+app.get('/api/bigtime/status', async (req, res, next) => {
+  try {
+    const status = await connectors.getStatus('bigtime');
+    res.json({ configured: status.configured, missing: [], projectName: status.fields.projectName || 'NEORide EZData (ATTAIN Grant Project)' });
+  } catch (e) { next(e); }
 });
 
 // BigTime data only needs to move weekly (subs invoice monthly at most) —
@@ -817,7 +871,9 @@ app.get('/api/bigtime/budget', async (req, res, next) => {
     const today = todayISO();
     const dueSince = lastBudgetCheckpoint(today);
     if (!budgetCache || budgetCache.fetchedOn < dueSince) {
-      const summary = await bigtime.getProjectBudgetSummary(BIGTIME_PROJECT_NAME);
+      const config = await connectors.getConfig('bigtime');
+      const projectName = config.projectName || 'NEORide EZData (ATTAIN Grant Project)';
+      const summary = await bigtime.getProjectBudgetSummary(projectName);
       budgetCache = { ...summary, fetchedOn: today };
     }
     res.json(budgetCache);
@@ -827,8 +883,11 @@ app.get('/api/bigtime/budget', async (req, res, next) => {
 // The Dropbox Chooser widget only ever needs the public app key (never the
 // secret or refresh token) — safe to hand to the browser so it can pop the
 // picker and hand back an already-shareable link for the file the user picks.
-app.get('/api/dropbox/chooser-config', (req, res) => {
-  res.json({ appKey: process.env.DROPBOX_APP_KEY || null });
+app.get('/api/dropbox/chooser-config', async (req, res, next) => {
+  try {
+    const config = await connectors.getConfig('dropbox');
+    res.json({ appKey: config.appKey || null });
+  } catch (e) { next(e); }
 });
 
 // ---- Key documents (dashboard tiles linking to files already in Dropbox) ----
@@ -867,9 +926,11 @@ app.delete('/api/documents/:id', async (req, res, next) => {
 });
 
 // ---- Meeting recordings (stored in an S3-compatible bucket — see lib/storage.js) ----
-app.get('/api/storage/status', (req, res) => {
-  const missing = storage.missingVars();
-  res.json({ configured: missing.length === 0, missing });
+app.get('/api/storage/status', async (req, res, next) => {
+  try {
+    const status = await connectors.getStatus('storage');
+    res.json({ configured: status.configured, missing: [] });
+  } catch (e) { next(e); }
 });
 
 app.get('/api/recordings', async (req, res, next) => {

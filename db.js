@@ -89,6 +89,46 @@ async function init() {
     created_at TEXT NOT NULL
   )`);
 
+  // Connector credentials, encrypted (see lib/crypto.js) — one row per
+  // connector type. No row for a type means "not connected", same idiom as
+  // the old env-var-only isConfigured()/missingVars() checks. Falls back to
+  // env vars when no row exists yet, so this table can ship before the
+  // one-time migration script (scripts/migrate-connectors-to-db.js) runs.
+  await query(`CREATE TABLE IF NOT EXISTS connector_configs (
+    ${idCol},
+    connector_type TEXT NOT NULL UNIQUE,
+    config_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Manual budget tracking, used only when budget_settings.mode = 'manual'
+  // (the alternative to a BigTime-powered gauge).
+  await query(`CREATE TABLE IF NOT EXISTS expenses (
+    ${idCol},
+    title TEXT NOT NULL,
+    amount REAL NOT NULL,
+    incurred_on TEXT,
+    created_at TEXT NOT NULL
+  )`);
+
+  // Singleton row (id always 1) holding which budget mode is active and the
+  // manual total, when in manual mode.
+  await query(`CREATE TABLE IF NOT EXISTS budget_settings (
+    id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'bigtime',
+    manual_total REAL
+  )`);
+  const budgetRow = await query('SELECT id FROM budget_settings WHERE id = 1');
+  if (!budgetRow.length) {
+    // Default to 'bigtime' when the BigTime connector is already configured
+    // (true for EZData today) so existing behavior is visually unchanged;
+    // otherwise default to 'manual' so the dashboard has something sensible
+    // to show before anyone has connected anything.
+    const bigtimeConfigured = !!(process.env.BIGTIME_API_KEY && process.env.BIGTIME_FIRM_ID);
+    await query('INSERT INTO budget_settings (id, mode, manual_total) VALUES (1, ?, ?)',
+      [bigtimeConfigured ? 'bigtime' : 'manual', null]);
+  }
+
   const existing = await query('SELECT COUNT(*) AS n FROM tasks');
   const n = Number(existing[0].n);
   if (n === 0) {
