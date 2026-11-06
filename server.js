@@ -12,6 +12,8 @@ const { parseDoc } = require('./lib/htmlBlocks');
 const dropbox = require('./lib/dropbox');
 const bigtime = require('./lib/bigtime');
 const storage = require('./lib/storage');
+const connectors = require('./lib/connectors');
+const { parseScheduleCsv, parseScheduleXlsx } = require('./lib/importSchedule');
 const aiTaskFill = require('./lib/aiTaskFill');
 const { computeMove } = require('./lib/taskMove');
 
@@ -45,6 +47,22 @@ function checkApiKey(req) {
   const bearer = header.replace(/^Bearer\s+/i, '');
   const provided = req.get('X-API-Key') || bearer;
   return !!provided && provided === process.env.API_KEY;
+}
+
+// A second, separate password just for editing connector credentials —
+// deliberately distinct from APP_PASSWORD, since everyone who can open this
+// site knows that one. There's no role system in this single-tenant app to
+// gate connector edits against otherwise, so this is a simple stand-in for
+// "only an admin can do this" until a real RBAC layer exists (see
+// ARCHITECTURE.md for the carried-forward multi-tenant design). Viewing
+// connector status is not gated — only PUT (actually changing something) is.
+function checkConnectorAdminPassword(req) {
+  const expected = process.env.CONNECTOR_ADMIN_PASSWORD;
+  if (!expected) return false; // refuse edits entirely until this is deliberately set
+  const provided = req.get('X-Connector-Admin-Password') || '';
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 // ---- Optional password protection for the web UI (set APP_PASSWORD in Railway variables) ----
@@ -653,6 +671,41 @@ app.get('/api/export.xlsx', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Import a schedule from CSV or XLSX — same column shape as the exports
+// above, so "download the export, edit it, re-upload it" works as the
+// template flow with no separate format to maintain. Replaces the entire
+// schedule; the frontend is responsible for confirming that with the user
+// before calling this.
+app.post('/api/schedule/import', async (req, res, next) => {
+  try {
+    const { filename, contentBase64 } = req.body || {};
+    if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 are required.' });
+    const buf = Buffer.from(contentBase64, 'base64');
+    const isXlsx = /\.xlsx$/i.test(filename);
+    const isCsv = /\.csv$/i.test(filename);
+    if (!isXlsx && !isCsv) return res.status(400).json({ error: 'Only .csv or .xlsx files are supported.' });
+
+    let tasks;
+    try {
+      tasks = isXlsx ? await parseScheduleXlsx(buf) : parseScheduleCsv(buf.toString('utf8'));
+    } catch (parseErr) {
+      return res.status(400).json({ error: parseErr.message });
+    }
+    if (!tasks.length) return res.status(400).json({ error: 'No task rows found in the file.' });
+
+    await query('DELETE FROM tasks');
+    for (const t of tasks) {
+      await query(
+        `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, notes, sort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [t.phase, t.wbs, t.title, t.lead, t.start_date, t.deadline, t.status, t.pct, t.notes, t.sort]
+      );
+    }
+    await syncFutureMeetingSnapshots();
+    res.json({ ok: true, imported: tasks.length });
+  } catch (e) { next(e); }
+});
+
 // ---------------------------------------------------------------------------
 // Meetings — agendas that turn into minutes
 // ---------------------------------------------------------------------------
@@ -788,17 +841,54 @@ app.get('/api/meetings/:id/export.pdf', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.get('/api/dropbox/status', (req, res) => {
-  const missing = dropbox.missingVars();
-  res.json({ configured: missing.length === 0, missing });
+// ---- Unified connector settings (BigTime / Dropbox / storage) ----
+// Reads status for all 3 in one call (for the Connectors settings screen);
+// viewing is unrestricted, editing requires the separate connector admin
+// password (see checkConnectorAdminPassword above).
+app.get('/api/connectors', async (req, res, next) => {
+  try {
+    const [bigtimeStatus, dropboxStatus, storageStatus] = await Promise.all([
+      connectors.getStatus('bigtime'),
+      connectors.getStatus('dropbox'),
+      connectors.getStatus('storage'),
+    ]);
+    res.json({
+      adminPasswordConfigured: !!process.env.CONNECTOR_ADMIN_PASSWORD,
+      bigtime: bigtimeStatus,
+      dropbox: dropboxStatus,
+      storage: storageStatus,
+    });
+  } catch (e) { next(e); }
 });
 
-// ---- BigTime (budget vs. invoiced-to-date odometer) ----
-const BIGTIME_PROJECT_NAME = process.env.BIGTIME_PROJECT_NAME || 'NEORide EZData (ATTAIN Grant Project)';
+app.post('/api/connectors/unlock', (req, res) => {
+  if (!checkConnectorAdminPassword(req)) return res.status(401).json({ error: 'Incorrect connector admin password.' });
+  res.json({ ok: true });
+});
 
-app.get('/api/bigtime/status', (req, res) => {
-  const missing = bigtime.missingVars();
-  res.json({ configured: missing.length === 0, missing, projectName: BIGTIME_PROJECT_NAME });
+app.put('/api/connectors/:type', async (req, res, next) => {
+  try {
+    if (!connectors.SCHEMAS[req.params.type]) return res.status(404).json({ error: 'Unknown connector type.' });
+    if (!checkConnectorAdminPassword(req)) return res.status(401).json({ error: 'Incorrect connector admin password.' });
+    await connectors.setConfig(req.params.type, req.body || {});
+    if (req.params.type === 'bigtime') budgetCache = null; // force a fresh fetch under the new config
+    const status = await connectors.getStatus(req.params.type);
+    res.json(status);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/dropbox/status', async (req, res, next) => {
+  try {
+    const status = await connectors.getStatus('dropbox');
+    res.json({ configured: status.configured, missing: [] }); // see the Connectors settings tab for what's unset
+  } catch (e) { next(e); }
+});
+
+app.get('/api/bigtime/status', async (req, res, next) => {
+  try {
+    const status = await connectors.getStatus('bigtime');
+    res.json({ configured: status.configured, missing: [], projectName: status.fields.projectName || 'NEORide EZData (ATTAIN Grant Project)' });
+  } catch (e) { next(e); }
 });
 
 // BigTime data only needs to move weekly (subs invoice monthly at most) —
@@ -817,18 +907,144 @@ app.get('/api/bigtime/budget', async (req, res, next) => {
     const today = todayISO();
     const dueSince = lastBudgetCheckpoint(today);
     if (!budgetCache || budgetCache.fetchedOn < dueSince) {
-      const summary = await bigtime.getProjectBudgetSummary(BIGTIME_PROJECT_NAME);
+      const config = await connectors.getConfig('bigtime');
+      const projectName = config.projectName || 'NEORide EZData (ATTAIN Grant Project)';
+      const summary = await bigtime.getProjectBudgetSummary(projectName);
       budgetCache = { ...summary, fetchedOn: today };
     }
     res.json(budgetCache);
   } catch (e) { next(e); }
 });
 
+// ---- Budget mode (BigTime-powered gauge vs. a manual expense log) ----
+// A project picks exactly one mode for its budget widget — never both at
+// once. EZData defaults to 'bigtime' (see db.js) since it's already
+// connected; a project with no BigTime connection can track manually.
+async function getBudgetSettings() {
+  const rows = await query('SELECT mode, manual_total FROM budget_settings WHERE id = 1');
+  return rows[0] || { mode: 'bigtime', manual_total: null };
+}
+
+app.get('/api/budget', async (req, res, next) => {
+  try {
+    const settings = await getBudgetSettings();
+    if (settings.mode === 'manual') {
+      const rows = await query('SELECT COALESCE(SUM(amount), 0) AS total FROM expenses');
+      const spent = Number(rows[0].total) || 0;
+      const total = settings.manual_total || 0;
+      res.json({ mode: 'manual', budgetTotal: total, spent, pctSpent: total ? spent / total : 0 });
+      return;
+    }
+    // mode === 'bigtime' — reuse the same cached fetch as /api/bigtime/budget
+    const today = todayISO();
+    const dueSince = lastBudgetCheckpoint(today);
+    if (!budgetCache || budgetCache.fetchedOn < dueSince) {
+      const config = await connectors.getConfig('bigtime');
+      const projectName = config.projectName || 'NEORide EZData (ATTAIN Grant Project)';
+      const summary = await bigtime.getProjectBudgetSummary(projectName);
+      budgetCache = { ...summary, fetchedOn: today };
+    }
+    res.json({ mode: 'bigtime', ...budgetCache });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/budget/settings', async (req, res, next) => {
+  try {
+    res.json(await getBudgetSettings());
+  } catch (e) { next(e); }
+});
+
+app.put('/api/budget/settings', async (req, res, next) => {
+  try {
+    const { mode, manualTotal } = req.body || {};
+    const fields = {};
+    if (mode !== undefined) {
+      if (!['bigtime', 'manual'].includes(mode)) return res.status(400).json({ error: 'Invalid budget mode.' });
+      if (mode === 'bigtime' && !(await bigtime.isConfigured())) {
+        return res.status(400).json({ error: 'Connect BigTime in the Connectors tab before switching to it.' });
+      }
+      fields.mode = mode;
+    }
+    if (manualTotal !== undefined) {
+      const n = Number(manualTotal);
+      if (Number.isNaN(n) || n < 0) return res.status(400).json({ error: 'Invalid budget total.' });
+      fields.manual_total = n;
+    }
+    const keys = Object.keys(fields);
+    if (!keys.length) return res.json(await getBudgetSettings());
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    await query(`UPDATE budget_settings SET ${setSql} WHERE id = 1`, keys.map(k => fields[k]));
+    res.json(await getBudgetSettings());
+  } catch (e) { next(e); }
+});
+
+app.get('/api/expenses', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM expenses ORDER BY incurred_on DESC, id DESC');
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/expenses', async (req, res, next) => {
+  try {
+    const title = String((req.body || {}).title || '').trim();
+    const amount = Number((req.body || {}).amount);
+    const incurredOn = (req.body || {}).incurredOn || null;
+    if (!title) return res.status(400).json({ error: 'Title is required.' });
+    if (Number.isNaN(amount) || amount < 0) return res.status(400).json({ error: 'Invalid amount.' });
+    const now = new Date().toISOString();
+    const inserted = await query(
+      usePg
+        ? 'INSERT INTO expenses (title, amount, incurred_on, created_at) VALUES (?, ?, ?, ?) RETURNING *'
+        : 'INSERT INTO expenses (title, amount, incurred_on, created_at) VALUES (?, ?, ?, ?)',
+      [title, amount, incurredOn, now]
+    );
+    const row = usePg ? inserted[0] : (await query('SELECT * FROM expenses WHERE id = last_insert_rowid()'))[0];
+    res.status(201).json(row);
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/expenses/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await query('SELECT id FROM expenses WHERE id = ?', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Expense not found.' });
+    const b = req.body || {};
+    const fields = {};
+    if (b.title !== undefined) {
+      const title = String(b.title).trim();
+      if (!title) return res.status(400).json({ error: 'Title is required.' });
+      fields.title = title;
+    }
+    if (b.amount !== undefined) {
+      const amount = Number(b.amount);
+      if (Number.isNaN(amount) || amount < 0) return res.status(400).json({ error: 'Invalid amount.' });
+      fields.amount = amount;
+    }
+    if (b.incurredOn !== undefined) fields.incurred_on = b.incurredOn || null;
+    const keys = Object.keys(fields);
+    if (!keys.length) return res.json({ ok: true });
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    await query(`UPDATE expenses SET ${setSql} WHERE id = ?`, [...keys.map(k => fields[k]), id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/expenses/:id', async (req, res, next) => {
+  try {
+    await query('DELETE FROM expenses WHERE id = ?', [Number(req.params.id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // The Dropbox Chooser widget only ever needs the public app key (never the
 // secret or refresh token) — safe to hand to the browser so it can pop the
 // picker and hand back an already-shareable link for the file the user picks.
-app.get('/api/dropbox/chooser-config', (req, res) => {
-  res.json({ appKey: process.env.DROPBOX_APP_KEY || null });
+app.get('/api/dropbox/chooser-config', async (req, res, next) => {
+  try {
+    const config = await connectors.getConfig('dropbox');
+    res.json({ appKey: config.appKey || null });
+  } catch (e) { next(e); }
 });
 
 // ---- Key documents (dashboard tiles linking to files already in Dropbox) ----
@@ -867,9 +1083,11 @@ app.delete('/api/documents/:id', async (req, res, next) => {
 });
 
 // ---- Meeting recordings (stored in an S3-compatible bucket — see lib/storage.js) ----
-app.get('/api/storage/status', (req, res) => {
-  const missing = storage.missingVars();
-  res.json({ configured: missing.length === 0, missing });
+app.get('/api/storage/status', async (req, res, next) => {
+  try {
+    const status = await connectors.getStatus('storage');
+    res.json({ configured: status.configured, missing: [] });
+  } catch (e) { next(e); }
 });
 
 app.get('/api/recordings', async (req, res, next) => {

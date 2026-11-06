@@ -12,10 +12,22 @@ A web replacement for `EZData_Schedule.xlsm`. Everything the workbook did, witho
 - **Recordings** — a central place for meeting/discovery-session recordings, stored in an S3-compatible bucket (Cloudflare R2 recommended — see setup below). Upload a file, optionally tag it with a phase and/or a set of meeting notes, and it gets a permanent link (`/r/<token>`) safe to copy and send to anyone — opening it always redirects to a freshly generated, short-lived download URL, so the link itself never goes stale. Uploads go straight from your browser to the bucket, so even multi-GB video doesn't pass through the app server.
 - **Meetings** — create a dated agenda that auto-imports a snapshot of what's due in the next two weeks (as a table, same columns as the dashboard's near-term list) under an "EZData" section, plus a "NEORide Technology On-Call Projects" section for anything else. Add your own discussion items, then mark up the agenda live during the meeting — a "Meeting mode" toggle colors newly typed text red so notes are visually distinct from the pre-meeting agenda, no matter how the new text is created (continuing to type, pressing Enter for a new bullet, Tab-indenting a sub-bullet — all of it turns red while the mode is on). Bold/italic and a Word-style font color button (click the "A" to apply its current color to a highlight in one click, or the small arrow next to it to pick a different color from a palette or a full color wheel) are also available, along with new headers and Tab/Shift+Tab to indent/outdent bullets (nested bullets carry their indentation through to the Word/PDF export too). Search across every meeting's notes right from the meetings list — type a word or phrase and matching meetings show up instantly with the specific sentence/bullet it appeared in highlighted, Gmail-style, without opening each document. Title and date are editable any time. Every meeting has its own shareable URL (`/meetings/:id`) — open one and copy the address bar link to send it to a client or teammate; hitting Save returns you to the meetings list. Every meeting is saved and browsable from a history list. **Any meeting dated today or later has its "upcoming two weeks" table kept in sync automatically whenever the schedule changes** — past meetings are a frozen historical record and are never touched. Download any meeting as a real Word (.docx) or PDF document, or send it straight to a Dropbox folder.
 - **Export** — CSV, or Excel (.xlsx) which mirrors the on-screen formatting (row shading, status/weight chips, frozen columns) and renders the Gantt chart as colored month cells, plus a phase-color legend sheet.
+- **Schedule import** — the Schedule tab's **Download template** button is just the CSV export (no separate format to learn); edit it by hand or with another tool, then **Upload schedule** to replace the entire schedule in one shot. Columns are matched by name, not position. A confirmation dialog warns you before anything is replaced.
+- **Connectors tab** — BigTime, Dropbox, and recording storage are now configured from inside the app (Connectors tab) instead of Railway variables, encrypted in the database. Editing requires a separate connector admin password (`CONNECTOR_ADMIN_PASSWORD`) distinct from the site password, so not everyone who can open the site can change where your data goes — see the setup section below.
+- **Manual budget tracking** — if you don't want to connect BigTime, the budget widget can track a manually-entered total against a running expense log instead. Pick one mode or the other when the widget first loads; switch later from a small link next to it.
 
 Your full schedule data is included in `seed.json` and loads automatically the first time the app starts against an empty database.
 
 ---
+
+## Connectors: setup and migration
+
+As of this version, BigTime/Dropbox/storage credentials live encrypted in the database and are managed from the app's **Connectors** tab rather than Railway variables. This is the one piece built specifically to port cleanly into a future multi-tenant host, which will need per-project credentials set through a UI, not shared env vars.
+
+1. **Generate an encryption key** and add it as a Railway variable: `CREDENTIAL_ENCRYPTION_KEY`, set to the output of `openssl rand -base64 32`. This is the only connector-related secret left in Railway — everything it protects lives in Postgres.
+2. **Pick a connector admin password** and add it as `CONNECTOR_ADMIN_PASSWORD` — deliberately separate from `APP_PASSWORD`, so editing connectors needs a second password even though everyone who knows the site password can already view the dashboard. Until this variable is set, connector edits are refused outright (not silently open).
+3. **Deploy the pending variables**, then run the one-time migration to carry over whatever's already in your Railway variables: `railway run node scripts/migrate-connectors-to-db.js`. It's safe to re-run — it skips any connector that already has a stored config, so it will never overwrite a change made through the Connectors tab afterward.
+4. From then on, use the **Connectors** tab to view status and make changes. The old Railway variables (`BIGTIME_API_KEY`, `DROPBOX_APP_SECRET`, `S3_ACCESS_KEY_ID`, etc.) still work as a fallback for any field not yet set in the database, so this migrates gradually rather than as a risky flag-day cutover — you can safely leave the old variables in place indefinitely.
 
 ## Deploy to Railway (about 10 minutes)
 
@@ -107,6 +119,7 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | Hidden Lists sheet | `GET /api/lists` (derived live from the data, so new leads appear automatically) |
 | Editing cells directly | Edit button on any leaf row → `PATCH /api/tasks/:id` |
 | — | `DELETE /api/tasks/:id`, `GET /api/export.csv`, `GET /api/export.xlsx` |
+| — | Schedule import → `POST /api/schedule/import` |
 | Dragging a row on the Schedule tab | `POST /api/tasks/:id/move` (renumbers WBS/sort/phase for the moved subtree and any shifted siblings) |
 | The "+" between rows on the Schedule tab | `POST /api/tasks/insert` (creates the task, then runs it through the same renumbering engine as a move) |
 | — | Meeting agendas/minutes → `GET/POST /api/meetings`, `GET/PATCH/DELETE /api/meetings/:id`, `.../export.docx`, `.../export.pdf`, `.../dropbox` |
@@ -114,6 +127,8 @@ With no `DATABASE_URL` set, the app uses a local SQLite file (`data.db`) — han
 | — | Key documents tiles → `GET/POST /api/documents`, `DELETE /api/documents/:id` |
 | — | Project budget gauge → `GET /api/bigtime/status`, `GET /api/bigtime/budget` |
 | — | Recordings → `GET /api/storage/status`, `GET/POST /api/recordings`, `PATCH/DELETE /api/recordings/:id`, `POST /api/recordings/upload-url`, `GET /r/:token` |
+| — | Connectors → `GET /api/connectors`, `POST /api/connectors/unlock`, `PUT /api/connectors/:type` |
+| — | Manual budget → `GET/PUT /api/budget/settings`, `GET /api/budget`, `GET/POST /api/expenses`, `PATCH/DELETE /api/expenses/:id` |
 
 ## External API access
 

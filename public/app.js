@@ -26,7 +26,10 @@ const fmtBytes = n => {
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  // Merge headers explicitly - a plain {...opts} spread would let a caller's
+  // own `headers` option silently replace (not merge with) Content-Type,
+  // which would stop Express from parsing a JSON body at all.
+  const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...opts.headers } });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
@@ -110,29 +113,193 @@ async function renderDashboard() {
 }
 
 /* ---------------- project budget gauge (BigTime) ---------------- */
-async function renderBudgetGauge() {
-  const gauge = $('#budget-gauge');
-  const unconfiguredMsg = $('#budget-unconfigured-msg');
-  const errorMsg = $('#budget-error-msg');
-  gauge.hidden = true;
-  unconfiguredMsg.hidden = true;
-  errorMsg.hidden = true;
+function setBudgetGauge(spent, total) {
+  const pct = total ? Math.min(1, Math.max(0, spent / total)) : 0;
+  $('#gauge-fill-path').setAttribute('stroke-dasharray', `${(pct * 100).toFixed(2)} 100`);
+  $('#gauge-pct').textContent = fmtPct(pct);
+  $('#gauge-spent').textContent = fmtMoney(spent);
+  $('#gauge-total').textContent = fmtMoney(total);
+}
 
+function hideAllBudgetSections() {
+  $('#budget-mode-choice').hidden = true;
+  $('#budget-gauge').hidden = true;
+  $('#budget-manual-panel').hidden = true;
+  $('#budget-unconfigured-msg').hidden = true;
+  $('#budget-error-msg').hidden = true;
+  $('#budget-change-mode-btn').hidden = true;
+}
+
+async function renderExpenses() {
+  const expenses = await api('/api/expenses');
+  const tbody = $('#expenses-table tbody');
+  $('#expenses-empty').hidden = expenses.length > 0;
+  $('#expenses-table').hidden = expenses.length === 0;
+  tbody.innerHTML = expenses.map(e => `
+    <tr data-id="${e.id}">
+      <td class="mono">${fmtDate(e.incurred_on)}</td>
+      <td>${esc(e.title)}</td>
+      <td class="num mono">${fmtMoney(e.amount)}</td>
+      <td class="actions-cell"><div class="row-actions"><button class="icon-btn icon-btn-danger" data-act="delete-expense" aria-label="Delete expense" title="Delete expense">${ICON_DELETE}</button></div></td>
+    </tr>`).join('');
+}
+
+async function renderManualBudget() {
+  const settings = await api('/api/budget/settings');
+  $('#manual-budget-total').value = settings.manual_total ?? '';
+  const b = await api('/api/budget');
+  setBudgetGauge(b.spent, b.budgetTotal);
+  $('#budget-gauge').hidden = false;
+  $('#budget-manual-panel').hidden = false;
+  await renderExpenses();
+}
+
+async function renderBigtimeBudget() {
+  const b = await api('/api/bigtime/budget');
+  setBudgetGauge(b.invoicedToDate, b.budgetTotal);
+  $('#budget-gauge').hidden = false;
+}
+
+// A project's budget widget shows exactly one mode at a time (BigTime's live
+// gauge, or a manual expense log) - never both competing for attention.
+// "Fresh" (never deliberately set up) means manual mode with no total and no
+// expenses yet - that's when the either/or choice takes over the panel.
+async function renderBudgetGauge() {
+  hideAllBudgetSections();
   try {
-    const status = await api('/api/bigtime/status');
-    if (!status.configured) { unconfiguredMsg.hidden = false; return; }
-    const b = await api('/api/bigtime/budget');
-    const pct = Math.min(1, Math.max(0, b.pctSpent || 0));
-    $('#gauge-fill-path').setAttribute('stroke-dasharray', `${(pct * 100).toFixed(2)} 100`);
-    $('#gauge-pct').textContent = fmtPct(pct);
-    $('#gauge-spent').textContent = fmtMoney(b.invoicedToDate);
-    $('#gauge-total').textContent = fmtMoney(b.budgetTotal);
-    gauge.hidden = false;
+    const settings = await api('/api/budget/settings');
+    if (settings.mode === 'manual' && settings.manual_total == null) {
+      const expenses = await api('/api/expenses');
+      if (!expenses.length) { $('#budget-mode-choice').hidden = false; return; }
+    }
+    $('#budget-change-mode-btn').hidden = false;
+    if (settings.mode === 'bigtime') {
+      const status = await api('/api/bigtime/status');
+      if (!status.configured) { $('#budget-unconfigured-msg').hidden = false; return; }
+      await renderBigtimeBudget();
+    } else {
+      await renderManualBudget();
+    }
   } catch (err) {
-    errorMsg.textContent = `Couldn't load BigTime budget data: ${err.message}`;
-    errorMsg.hidden = false;
+    $('#budget-error-msg').textContent = `Couldn't load budget data: ${err.message}`;
+    $('#budget-error-msg').hidden = false;
   }
 }
+
+$('#budget-choose-bigtime').addEventListener('click', async () => {
+  try {
+    await api('/api/budget/settings', { method: 'PUT', body: JSON.stringify({ mode: 'bigtime' }) });
+    await renderBudgetGauge();
+  } catch (err) { toast(err.message); }
+});
+$('#budget-choose-manual').addEventListener('click', async () => {
+  try {
+    await api('/api/budget/settings', { method: 'PUT', body: JSON.stringify({ mode: 'manual' }) });
+    await renderBudgetGauge();
+  } catch (err) { toast(err.message); }
+});
+$('#budget-change-mode-btn').addEventListener('click', () => {
+  hideAllBudgetSections();
+  $('#budget-mode-choice').hidden = false;
+});
+
+$('#manual-budget-save-total').addEventListener('click', async () => {
+  const total = $('#manual-budget-total').value;
+  try {
+    await api('/api/budget/settings', { method: 'PUT', body: JSON.stringify({ manualTotal: total }) });
+    toast('Budget total saved');
+    await renderBudgetGauge();
+  } catch (err) { toast(err.message); }
+});
+
+$('#expense-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const title = $('#expense-title').value.trim();
+  const amount = $('#expense-amount').value;
+  const incurredOn = $('#expense-date').value || null;
+  if (!title || amount === '') return;
+  try {
+    await api('/api/expenses', { method: 'POST', body: JSON.stringify({ title, amount, incurredOn }) });
+    e.target.reset();
+    await renderBudgetGauge();
+  } catch (err) { toast(err.message); }
+});
+
+$('#expenses-table').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-act="delete-expense"]');
+  if (!btn) return;
+  const id = btn.closest('tr[data-id]').dataset.id;
+  if (!confirm('Delete this expense?')) return;
+  try {
+    await api(`/api/expenses/${id}`, { method: 'DELETE' });
+    await renderBudgetGauge();
+  } catch (err) { toast(err.message); }
+});
+
+/* ---------------- connectors settings ---------------- */
+let connectorAdminPassword = null; // in-memory only - never persisted, re-enter each load
+
+function setConnectorStatusChip(el, configured) {
+  el.textContent = configured ? 'Connected' : 'Not set up';
+  el.className = 'status-chip ' + (configured ? 'status-Complete' : 'status-NotStarted');
+}
+
+async function renderConnectors() {
+  const data = await api('/api/connectors');
+  setConnectorStatusChip($('#connector-status-bigtime'), data.bigtime.configured);
+  setConnectorStatusChip($('#connector-status-dropbox'), data.dropbox.configured);
+  setConnectorStatusChip($('#connector-status-storage'), data.storage.configured);
+
+  if (connectorAdminPassword) {
+    $('#connectors-locked').hidden = true;
+    $('#connectors-cards').hidden = false;
+    for (const type of ['bigtime', 'dropbox', 'storage']) {
+      const form = document.querySelector(`.connector-form[data-connector="${type}"]`);
+      for (const [field, value] of Object.entries(data[type].fields)) {
+        const input = form.querySelector(`[name="${field}"]`);
+        if (!input) continue;
+        if (input.type === 'password') continue; // never prefill secrets
+        input.value = value || '';
+      }
+    }
+  }
+}
+
+$('#connectors-unlock-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const password = $('#connectors-unlock-password').value;
+  const msg = $('#connectors-unlock-msg');
+  msg.textContent = '';
+  try {
+    await api('/api/connectors/unlock', { method: 'POST', headers: { 'X-Connector-Admin-Password': password }, body: '{}' });
+    connectorAdminPassword = password;
+    $('#connectors-unlock-password').value = '';
+    await renderConnectors();
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
+document.querySelectorAll('.connector-form').forEach(form => {
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const type = form.dataset.connector;
+    const body = {};
+    for (const input of form.querySelectorAll('input[name]')) {
+      if (input.value !== '') body[input.name] = input.value; // blank secret = keep existing
+    }
+    try {
+      await api(`/api/connectors/${type}`, {
+        method: 'PUT',
+        headers: { 'X-Connector-Admin-Password': connectorAdminPassword || '' },
+        body: JSON.stringify(body),
+      });
+      toast(`${type[0].toUpperCase() + type.slice(1)} settings saved`);
+      form.querySelectorAll('input[type="password"]').forEach(i => { i.value = ''; });
+      await renderConnectors();
+    } catch (err) { toast(err.message); }
+  });
+});
 
 /* ---------------- key documents (dashboard tiles linking to Dropbox files) ---------------- */
 let DROPBOX_CHOOSER_APP_KEY = null;
@@ -451,6 +618,39 @@ function monthRange(rows) {
 }
 
 let SCHEDULE_ROWS = [];
+
+/* ---------------- schedule import (replace from CSV/XLSX) ---------------- */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]); // strip the data: URL prefix
+    reader.onerror = () => reject(new Error('Could not read the file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+$('#schedule-import-btn').addEventListener('click', () => $('#schedule-import-file').click());
+
+$('#schedule-import-file').addEventListener('change', async () => {
+  const file = $('#schedule-import-file').files[0];
+  $('#schedule-import-file').value = ''; // allow re-selecting the same file later
+  if (!file) return;
+  if (!confirm(`This replaces your entire current schedule with the contents of "${file.name}". Export a backup first if you want one. Continue?`)) return;
+
+  const msg = $('#schedule-import-msg');
+  msg.classList.remove('ok');
+  msg.textContent = 'Importing…';
+  try {
+    const contentBase64 = await fileToBase64(file);
+    const out = await api('/api/schedule/import', { method: 'POST', body: JSON.stringify({ filename: file.name, contentBase64 }) });
+    msg.textContent = `Imported ${out.imported} task(s).`;
+    msg.classList.add('ok');
+    toast('Schedule imported');
+    await refreshAll();
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
 
 async function renderSchedule() {
   const rows = await api('/api/schedule');
@@ -1402,7 +1602,7 @@ $('#meeting-dropbox').addEventListener('click', async () => {
 
 /* ---------------- boot ---------------- */
 async function refreshAll() {
-  await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList(), renderBudgetGauge()]);
+  await Promise.all([renderDashboard(), renderSchedule(), renderLists(), renderMeetingsList(), renderBudgetGauge(), renderConnectors()]);
   await Promise.all([renderDocuments(), renderRecordings()]); // depend on DASHBOARD_PHASES / MEETINGS set above
 }
 $('#nm-date').value = todayISOClient();
