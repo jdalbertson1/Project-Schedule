@@ -13,6 +13,7 @@ const dropbox = require('./lib/dropbox');
 const bigtime = require('./lib/bigtime');
 const storage = require('./lib/storage');
 const connectors = require('./lib/connectors');
+const { parseScheduleCsv, parseScheduleXlsx } = require('./lib/importSchedule');
 const aiTaskFill = require('./lib/aiTaskFill');
 const { computeMove } = require('./lib/taskMove');
 
@@ -667,6 +668,41 @@ app.get('/api/export.xlsx', async (req, res, next) => {
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.set('Content-Disposition', 'attachment; filename="EZData_Schedule.xlsx"');
     res.send(buf);
+  } catch (e) { next(e); }
+});
+
+// Import a schedule from CSV or XLSX — same column shape as the exports
+// above, so "download the export, edit it, re-upload it" works as the
+// template flow with no separate format to maintain. Replaces the entire
+// schedule; the frontend is responsible for confirming that with the user
+// before calling this.
+app.post('/api/schedule/import', async (req, res, next) => {
+  try {
+    const { filename, contentBase64 } = req.body || {};
+    if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 are required.' });
+    const buf = Buffer.from(contentBase64, 'base64');
+    const isXlsx = /\.xlsx$/i.test(filename);
+    const isCsv = /\.csv$/i.test(filename);
+    if (!isXlsx && !isCsv) return res.status(400).json({ error: 'Only .csv or .xlsx files are supported.' });
+
+    let tasks;
+    try {
+      tasks = isXlsx ? await parseScheduleXlsx(buf) : parseScheduleCsv(buf.toString('utf8'));
+    } catch (parseErr) {
+      return res.status(400).json({ error: parseErr.message });
+    }
+    if (!tasks.length) return res.status(400).json({ error: 'No task rows found in the file.' });
+
+    await query('DELETE FROM tasks');
+    for (const t of tasks) {
+      await query(
+        `INSERT INTO tasks (phase, wbs, title, lead, start_date, deadline, status, pct, notes, sort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [t.phase, t.wbs, t.title, t.lead, t.start_date, t.deadline, t.status, t.pct, t.notes, t.sort]
+      );
+    }
+    await syncFutureMeetingSnapshots();
+    res.json({ ok: true, imported: tasks.length });
   } catch (e) { next(e); }
 });
 
