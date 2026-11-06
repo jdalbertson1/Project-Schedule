@@ -111,6 +111,29 @@ main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 60px; }
 .gauge-label strong { font: 700 16px var(--font-mono); color: var(--ink); }
 .gauge-label span { font-size: 12.5px; color: var(--ink-soft); font-weight: 600; margin-top: 2px; }
 
+.budget-mode-options { display: flex; gap: 10px; margin-top: 10px; }
+.manual-budget-total-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 16px; }
+.manual-budget-total-row label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.manual-budget-total-row input {
+  font: 500 14px var(--font-ui); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; color: var(--ink); width: 160px;
+}
+
+/* ---------- connectors ---------- */
+.connector-card {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; background: var(--panel);
+}
+.connector-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.connector-card-head h3 { margin: 0; font-size: 16px; }
+.connector-howto { background: #fbfcf3; border: 1px dashed var(--ph-4); border-radius: 8px; padding: 8px 12px; }
+.connector-form { display: flex; flex-wrap: wrap; gap: 14px 16px; align-items: flex-end; margin-top: 12px; }
+.connector-form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-soft); min-width: 180px; }
+.connector-form input {
+  font: 500 14px var(--font-ui); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+}
+
+.schedule-import-actions { display: flex; gap: 8px; align-items: center; }
+
 /* ---------- tables ---------- */
 .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .data-table th {

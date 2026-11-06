@@ -27,6 +27,7 @@
     <button class="tab" data-view="add" role="tab">Add task</button>
     <button class="tab" data-view="meetings" role="tab">Meetings</button>
     <button class="tab" data-view="recordings" role="tab">Recordings</button>
+    <button class="tab" data-view="connectors" role="tab">Connectors</button>
     <span class="tab-link export-menu">
       <button class="tab export-toggle" id="export-toggle" aria-haspopup="true" aria-expanded="false">Export ▾</button>
       <span class="export-dropdown" id="export-dropdown" hidden>
@@ -61,7 +62,19 @@
 
     <div class="panel-row">
       <div class="panel" id="budget-panel">
-        <h2>Project budget <span class="h-sub">— invoiced to date vs. total budget</span></h2>
+        <div class="panel-head">
+          <h2>Project budget</h2>
+          <button type="button" class="link-back" id="budget-change-mode-btn" hidden>Change how budget is tracked</button>
+        </div>
+
+        <div id="budget-mode-choice" hidden>
+          <p class="hint">How do you want to track this project's budget?</p>
+          <div class="budget-mode-options">
+            <button type="button" class="btn btn-primary" id="budget-choose-bigtime">Connect BigTime</button>
+            <button type="button" class="btn" id="budget-choose-manual">Track budget manually</button>
+          </div>
+        </div>
+
         <div class="budget-gauge" id="budget-gauge" hidden>
           <svg class="gauge-svg" viewBox="0 0 320 190">
             <path class="gauge-track" d="M 30 170 A 130 130 0 0 1 290 170" pathLength="100"></path>
@@ -71,15 +84,42 @@
           <div class="gauge-labels">
             <div class="gauge-label">
               <strong id="gauge-spent"></strong>
-              <span>Budget Spent</span>
+              <span>Spent</span>
             </div>
             <div class="gauge-label gauge-label-right">
               <strong id="gauge-total"></strong>
-              <span>Budget Total</span>
+              <span>Total</span>
             </div>
           </div>
         </div>
-        <p class="empty-msg" id="budget-unconfigured-msg" hidden>Connect BigTime (see README) to show the budget gauge.</p>
+
+        <div id="budget-manual-panel" hidden>
+          <div class="manual-budget-total-row">
+            <label>Total budget
+              <input type="number" id="manual-budget-total" min="0" step="1" placeholder="e.g. 50000">
+            </label>
+            <button type="button" class="btn" id="manual-budget-save-total">Save</button>
+          </div>
+          <form id="expense-form" class="new-meeting-row">
+            <label>Expense title
+              <input type="text" id="expense-title" placeholder="e.g. Subcontractor invoice" required>
+            </label>
+            <label>Amount
+              <input type="number" id="expense-amount" min="0" step="0.01" required>
+            </label>
+            <label>Date <span class="opt">optional</span>
+              <input type="date" id="expense-date">
+            </label>
+            <button type="submit" class="btn btn-primary">Add expense</button>
+          </form>
+          <table class="data-table" id="expenses-table">
+            <thead><tr><th class="mono">Date</th><th>Title</th><th class="num">Amount</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="empty-msg" id="expenses-empty" hidden>No expenses logged yet.</p>
+        </div>
+
+        <p class="empty-msg" id="budget-unconfigured-msg" hidden>BigTime isn't connected yet — set it up in the Connectors tab, or switch to manual tracking.</p>
         <p class="empty-msg" id="budget-error-msg" hidden></p>
       </div>
 
@@ -100,9 +140,17 @@
   <section id="view-schedule" class="view">
     <div class="panel">
       <div class="panel-head">
-        <h2>Detailed schedule</h2>
-        <p class="hint">Edit the lowest-level rows — parent rows roll up automatically. Scroll right for the month-by-month view.</p>
+        <div>
+          <h2>Detailed schedule</h2>
+          <p class="hint">Edit the lowest-level rows — parent rows roll up automatically. Scroll right for the month-by-month view.</p>
+        </div>
+        <div class="schedule-import-actions">
+          <a class="btn" href="/api/export.csv" download title="Download the current schedule — edit it and re-upload to make bulk changes">Download template</a>
+          <button type="button" class="btn" id="schedule-import-btn">Upload schedule</button>
+          <input type="file" id="schedule-import-file" accept=".csv,.xlsx" hidden>
+        </div>
       </div>
+      <p class="form-msg" id="schedule-import-msg" role="status"></p>
       <div class="schedule-scroll">
         <table class="data-table schedule-table" id="schedule-table">
           <thead><tr id="schedule-head">
@@ -228,6 +276,104 @@
         <tbody></tbody>
       </table>
       <p class="empty-msg" id="recordings-empty" hidden>No recordings yet — upload one above.</p>
+    </div>
+  </section>
+
+  <!-- CONNECTORS -->
+  <section id="view-connectors" class="view">
+    <div class="panel" id="connectors-panel">
+      <div class="panel-head">
+        <h2>Connectors</h2>
+        <p class="hint">Connect the outside tools this app can use — BigTime for the budget gauge, Dropbox for meeting exports and documents, and a storage bucket for recordings. None of these are required; each is independent, and you can connect, change, or remove any of them at any time.</p>
+      </div>
+
+      <div id="connectors-locked">
+        <p class="hint">Changing a connector requires the connector admin password — this keeps anyone who just knows the site password from changing where your data goes.</p>
+        <form id="connectors-unlock-form" class="new-meeting-row">
+          <label>Connector admin password
+            <input type="password" id="connectors-unlock-password" required>
+          </label>
+          <button type="submit" class="btn btn-primary">Unlock editing</button>
+        </form>
+        <p class="form-msg" id="connectors-unlock-msg" role="status"></p>
+      </div>
+
+      <div id="connectors-cards" hidden>
+        <!-- BigTime -->
+        <div class="connector-card">
+          <div class="connector-card-head">
+            <h3>BigTime</h3>
+            <span class="status-chip" id="connector-status-bigtime">—</span>
+          </div>
+          <p class="hint">Powers the project budget gauge on the Dashboard, comparing invoiced-to-date against the total budget.</p>
+          <p class="hint connector-howto">Where to find these: in BigTime, go to <strong>Firm Settings → API Access</strong> for your API Key and Firm ID.</p>
+          <form class="connector-form" data-connector="bigtime">
+            <label>API Key <span class="opt">secret — leave blank to keep the current one</span>
+              <input type="password" name="apiKey" placeholder="(unchanged)" autocomplete="off">
+            </label>
+            <label>Firm ID
+              <input type="text" name="firmId">
+            </label>
+            <label>Project name <span class="opt">which BigTime project this gauge pulls from</span>
+              <input type="text" name="projectName">
+            </label>
+            <button type="submit" class="btn btn-primary">Save BigTime settings</button>
+          </form>
+        </div>
+
+        <!-- Dropbox -->
+        <div class="connector-card">
+          <div class="connector-card-head">
+            <h3>Dropbox</h3>
+            <span class="status-chip" id="connector-status-dropbox">—</span>
+          </div>
+          <p class="hint">Where meeting Word/PDF exports get saved, and powers the "+ Add document" picker on the Dashboard.</p>
+          <p class="hint connector-howto">Getting a Dropbox connection set up takes one extra step beyond pasting in a key — see the README's Dropbox section for the short one-time authorization process. Once you have an App Key, App Secret, and Refresh Token, enter them below.</p>
+          <form class="connector-form" data-connector="dropbox">
+            <label>App Key
+              <input type="text" name="appKey">
+            </label>
+            <label>App Secret <span class="opt">secret — leave blank to keep the current one</span>
+              <input type="password" name="appSecret" placeholder="(unchanged)" autocomplete="off">
+            </label>
+            <label>Refresh Token <span class="opt">secret — leave blank to keep the current one</span>
+              <input type="password" name="refreshToken" placeholder="(unchanged)" autocomplete="off">
+            </label>
+            <label>Folder <span class="opt">where exports are saved, e.g. /Meetings</span>
+              <input type="text" name="folder" placeholder="/Meetings">
+            </label>
+            <button type="submit" class="btn btn-primary">Save Dropbox settings</button>
+          </form>
+        </div>
+
+        <!-- Storage (R2/S3) -->
+        <div class="connector-card">
+          <div class="connector-card-head">
+            <h3>Recording storage</h3>
+            <span class="status-chip" id="connector-status-storage">—</span>
+          </div>
+          <p class="hint">An S3-compatible bucket (Cloudflare R2 recommended) where meeting recordings are stored.</p>
+          <p class="hint connector-howto">Where to find these: in Cloudflare, go to <strong>R2 Object Storage → Manage R2 API Tokens → Create API Token</strong> (Object Read &amp; Write) for your Access Key ID and Secret Access Key; the Endpoint is shown on your R2 bucket's page.</p>
+          <form class="connector-form" data-connector="storage">
+            <label>Endpoint
+              <input type="text" name="endpoint" placeholder="https://&lt;account-id&gt;.r2.cloudflarestorage.com">
+            </label>
+            <label>Access Key ID <span class="opt">secret — leave blank to keep the current one</span>
+              <input type="password" name="accessKeyId" placeholder="(unchanged)" autocomplete="off">
+            </label>
+            <label>Secret Access Key <span class="opt">secret — leave blank to keep the current one</span>
+              <input type="password" name="secretAccessKey" placeholder="(unchanged)" autocomplete="off">
+            </label>
+            <label>Bucket
+              <input type="text" name="bucket">
+            </label>
+            <label>Region <span class="opt">optional — "auto" for R2</span>
+              <input type="text" name="region" placeholder="auto">
+            </label>
+            <button type="submit" class="btn btn-primary">Save storage settings</button>
+          </form>
+        </div>
+      </div>
     </div>
   </section>
 
