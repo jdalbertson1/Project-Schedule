@@ -880,6 +880,127 @@ app.get('/api/bigtime/budget', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ---- Budget mode (BigTime-powered gauge vs. a manual expense log) ----
+// A project picks exactly one mode for its budget widget — never both at
+// once. EZData defaults to 'bigtime' (see db.js) since it's already
+// connected; a project with no BigTime connection can track manually.
+async function getBudgetSettings() {
+  const rows = await query('SELECT mode, manual_total FROM budget_settings WHERE id = 1');
+  return rows[0] || { mode: 'bigtime', manual_total: null };
+}
+
+app.get('/api/budget', async (req, res, next) => {
+  try {
+    const settings = await getBudgetSettings();
+    if (settings.mode === 'manual') {
+      const rows = await query('SELECT COALESCE(SUM(amount), 0) AS total FROM expenses');
+      const spent = Number(rows[0].total) || 0;
+      const total = settings.manual_total || 0;
+      res.json({ mode: 'manual', budgetTotal: total, spent, pctSpent: total ? spent / total : 0 });
+      return;
+    }
+    // mode === 'bigtime' — reuse the same cached fetch as /api/bigtime/budget
+    const today = todayISO();
+    const dueSince = lastBudgetCheckpoint(today);
+    if (!budgetCache || budgetCache.fetchedOn < dueSince) {
+      const config = await connectors.getConfig('bigtime');
+      const projectName = config.projectName || 'NEORide EZData (ATTAIN Grant Project)';
+      const summary = await bigtime.getProjectBudgetSummary(projectName);
+      budgetCache = { ...summary, fetchedOn: today };
+    }
+    res.json({ mode: 'bigtime', ...budgetCache });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/budget/settings', async (req, res, next) => {
+  try {
+    res.json(await getBudgetSettings());
+  } catch (e) { next(e); }
+});
+
+app.put('/api/budget/settings', async (req, res, next) => {
+  try {
+    const { mode, manualTotal } = req.body || {};
+    const fields = {};
+    if (mode !== undefined) {
+      if (!['bigtime', 'manual'].includes(mode)) return res.status(400).json({ error: 'Invalid budget mode.' });
+      if (mode === 'bigtime' && !(await bigtime.isConfigured())) {
+        return res.status(400).json({ error: 'Connect BigTime in the Connectors tab before switching to it.' });
+      }
+      fields.mode = mode;
+    }
+    if (manualTotal !== undefined) {
+      const n = Number(manualTotal);
+      if (Number.isNaN(n) || n < 0) return res.status(400).json({ error: 'Invalid budget total.' });
+      fields.manual_total = n;
+    }
+    const keys = Object.keys(fields);
+    if (!keys.length) return res.json(await getBudgetSettings());
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    await query(`UPDATE budget_settings SET ${setSql} WHERE id = 1`, keys.map(k => fields[k]));
+    res.json(await getBudgetSettings());
+  } catch (e) { next(e); }
+});
+
+app.get('/api/expenses', async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM expenses ORDER BY incurred_on DESC, id DESC');
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/expenses', async (req, res, next) => {
+  try {
+    const title = String((req.body || {}).title || '').trim();
+    const amount = Number((req.body || {}).amount);
+    const incurredOn = (req.body || {}).incurredOn || null;
+    if (!title) return res.status(400).json({ error: 'Title is required.' });
+    if (Number.isNaN(amount) || amount < 0) return res.status(400).json({ error: 'Invalid amount.' });
+    const now = new Date().toISOString();
+    const inserted = await query(
+      usePg
+        ? 'INSERT INTO expenses (title, amount, incurred_on, created_at) VALUES (?, ?, ?, ?) RETURNING *'
+        : 'INSERT INTO expenses (title, amount, incurred_on, created_at) VALUES (?, ?, ?, ?)',
+      [title, amount, incurredOn, now]
+    );
+    const row = usePg ? inserted[0] : (await query('SELECT * FROM expenses WHERE id = last_insert_rowid()'))[0];
+    res.status(201).json(row);
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/expenses/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await query('SELECT id FROM expenses WHERE id = ?', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Expense not found.' });
+    const b = req.body || {};
+    const fields = {};
+    if (b.title !== undefined) {
+      const title = String(b.title).trim();
+      if (!title) return res.status(400).json({ error: 'Title is required.' });
+      fields.title = title;
+    }
+    if (b.amount !== undefined) {
+      const amount = Number(b.amount);
+      if (Number.isNaN(amount) || amount < 0) return res.status(400).json({ error: 'Invalid amount.' });
+      fields.amount = amount;
+    }
+    if (b.incurredOn !== undefined) fields.incurred_on = b.incurredOn || null;
+    const keys = Object.keys(fields);
+    if (!keys.length) return res.json({ ok: true });
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    await query(`UPDATE expenses SET ${setSql} WHERE id = ?`, [...keys.map(k => fields[k]), id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/expenses/:id', async (req, res, next) => {
+  try {
+    await query('DELETE FROM expenses WHERE id = ?', [Number(req.params.id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // The Dropbox Chooser widget only ever needs the public app key (never the
 // secret or refresh token) — safe to hand to the browser so it can pop the
 // picker and hand back an already-shareable link for the file the user picks.
